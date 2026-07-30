@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 import httpx
 
-from paypal.signup_lab import SignupLabInputs, classify_signup_document
+from paypal.signup_lab import RoxySignupLab, SignupLabInputs, classify_signup_document
 from paypal.traffic_recorder import TrafficRecorder
 from tools.compare_paypal_traffic import compare
 
@@ -116,3 +116,16 @@ def test_signup_lab_contains_no_network_or_cdp_discovery() -> None:
     )
     for marker in forbidden:
         assert marker not in sources
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("https://www.paypal.com/agreements/approve?ba_token=BA-X", "approval"),
+        ("https://www.paypal.com/pay?token=BA-X", "pay"),
+        ("https://www.paypal.com/pay/checkout/signup/contact?token=BA-X", "contact"),
+        ("https://www.paypal.com/checkoutweb/signup?token=EC-X", "checkoutweb_signup"),
+    ],
+)
+def test_roxy_signup_lab_classifies_navigation_stage(url: str, expected: str) -> None:
+    assert RoxySignupLab._page_stage(url) == expected

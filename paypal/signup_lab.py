@@ -169,6 +169,7 @@ class CdpCapture:
         self.requests: dict[str, dict[str, Any]] = {}
         self.extra_headers: dict[str, dict[str, Any]] = {}
         self.responses: dict[str, dict[str, Any]] = {}
+        self.challenge_urls: list[str] = []
 
     def start(self) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
@@ -190,6 +191,10 @@ class CdpCapture:
     def _request(self, event: dict[str, Any]) -> None:
         request_id = str(event.get("requestId") or "")
         self.requests[request_id] = event
+        url = str((event.get("request") or {}).get("url") or "")
+        lowered = url.lower()
+        if any(marker in lowered for marker in ("authchallenge", "hcaptchapassive", "/captcha/", "datadome")):
+            self.challenge_urls.append(url)
         self._record("requestWillBeSent", event)
 
     def _request_extra(self, event: dict[str, Any]) -> None:
@@ -277,10 +282,78 @@ class RoxySignupLab:
                     continue
         return False
 
+    @staticmethod
+    def _page_stage(url: str) -> str:
+        path = urllib.parse.urlsplit(url).path.lower()
+        if path.startswith("/checkoutweb/signup"):
+            return "checkoutweb_signup"
+        if path.startswith("/pay/checkout/signup/contact"):
+            return "contact"
+        if path == "/pay" or path.startswith("/pay/"):
+            return "pay"
+        if path.startswith("/agreements/approve"):
+            return "approval"
+        return "unknown"
+
+    def _capture_controls(self, page: Any, context: BrowserSignupContext, stage: str) -> None:
+        try:
+            controls = page.locator("input, select, textarea, button, a").evaluate_all(
+                """elements => elements.slice(0, 100).map((el, index) => ({
+                    index, tag: el.tagName.toLowerCase(), type: el.type || '',
+                    name: el.name || '', id: el.id || '', autocomplete: el.autocomplete || '',
+                    placeholder: el.placeholder || '', ariaLabel: el.getAttribute('aria-label') || '',
+                    text: (el.innerText || el.value || '').trim().slice(0, 120),
+                    visible: !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length)
+                }))"""
+            )
+        except Exception as exc:
+            controls = [{"capture_error": str(exc)}]
+        _append_jsonl(
+            self.capture_root / "browser" / "control-summaries.jsonl",
+            {"time": _utc_now(), "stage": stage, "url_path": urllib.parse.urlsplit(page.url).path, "controls": controls},
+        )
+        context.stages.append({"time": _utc_now(), "event": "controls_captured", "stage": stage})
+
+    def _challenge_evidence(self, page: Any, capture: CdpCapture, body: str) -> list[str]:
+        evidence = [marker for marker in _CHALLENGE_MARKERS if marker in body.lower()]
+        url_lower = page.url.lower()
+        if any(marker in url_lower for marker in ("authchallenge", "/captcha/", "datadome")):
+            evidence.append("challenge_url")
+        try:
+            cookies = page.context.cookies()
+        except Exception:
+            cookies = []
+        tsrce = next((str(item.get("value") or "").lower() for item in cookies if item.get("name") == "tsrce"), "")
+        if "authchallenge" in tsrce:
+            evidence.append("tsrce_authchallenge")
+        # A passive challenge script may complete normally. Treat it as terminal
+        # only when the page/cookie state also says the session is challenged.
+        if evidence and capture.challenge_urls:
+            evidence.append("challenge_network")
+        return list(dict.fromkeys(evidence))
+
+    def _fill_contact_phone(self, page: Any) -> bool:
+        selectors = (
+            "input[type=tel]",
+            "input[autocomplete=tel]",
+            "input[name*=phone i]",
+            "input[id*=phone i]",
+        )
+        for selector in selectors:
+            locator = page.locator(selector)
+            try:
+                if locator.count() and locator.first.is_visible():
+                    locator.first.fill(self.phone)
+                    return True
+            except Exception:
+                continue
+        return False
+
     def _drive_to_signup(self, page: Any, capture: CdpCapture, context: BrowserSignupContext) -> None:
         deadline = time.monotonic() + 150
-        email_filled = False
         last_url = ""
+        captured_stages: set[str] = set()
+        completed_actions: set[str] = set()
         while time.monotonic() < deadline:
             page.wait_for_timeout(350)
             url = page.url
@@ -296,17 +369,16 @@ class RoxySignupLab:
                 body = page.locator("body").inner_text(timeout=1500)[:10000]
             except Exception:
                 pass
-            markers = [marker for marker in _CHALLENGE_MARKERS if marker in body.lower()]
+            markers = self._challenge_evidence(page, capture, body)
             if markers:
                 context.challenge_markers = markers
                 raise RuntimeError("ROXY_SIGNUP_CHALLENGED")
-            if self._click_first(page, (r"pay with card", r"debit or credit card")):
-                context.stages.append({"time": _utc_now(), "event": "pay_with_card"})
-                continue
-            if self._click_first(page, (r"create account", r"sign up")):
-                context.stages.append({"time": _utc_now(), "event": "create_account"})
-                continue
-            if not email_filled:
+            stage = self._page_stage(url)
+            if stage not in captured_stages:
+                self._capture_controls(page, context, stage)
+                captured_stages.add(stage)
+            if stage == "approval" and "approval_continue" not in completed_actions:
+                email_filled = False
                 for selector in ("input[type=email]", "input[name=login_email]", "input[name=email]"):
                     locator = page.locator(selector)
                     try:
@@ -319,9 +391,22 @@ class RoxySignupLab:
                             break
                     except Exception:
                         continue
-            if email_filled and self._click_first(page, (r"continue", r"next")):
-                context.stages.append({"time": _utc_now(), "event": "continue"})
-                continue
+                if email_filled and self._click_first(page, (r"continue", r"next")):
+                    completed_actions.add("approval_continue")
+                    context.stages.append({"time": _utc_now(), "event": "approval_continue"})
+                    continue
+            elif stage == "pay" and "pay_continue" not in completed_actions:
+                if self._click_first(page, (r"pay with card", r"debit or credit card", r"create account", r"continue", r"next")):
+                    completed_actions.add("pay_continue")
+                    context.stages.append({"time": _utc_now(), "event": "pay_continue"})
+                    continue
+            elif stage == "contact" and "contact_continue" not in completed_actions:
+                phone_filled = self._fill_contact_phone(page)
+                context.stages.append({"time": _utc_now(), "event": "contact_phone", "filled": phone_filled})
+                if phone_filled and self._click_first(page, (r"continue", r"next")):
+                    completed_actions.add("contact_continue")
+                    context.stages.append({"time": _utc_now(), "event": "contact_continue"})
+                    continue
         raise RuntimeError("ROXY_SIGNUP_REDIRECT_TIMEOUT")
 
     @staticmethod
