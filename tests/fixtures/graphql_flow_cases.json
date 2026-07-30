@@ -1,0 +1,86 @@
+{
+  "validate_fi_without_token": {
+    "errors": [
+      {
+        "message": "CREATE_CARD_ACCOUNT_CANDIDATE_VALIDATION_ERROR",
+        "checkpoints": ["validate.fi"],
+        "contingency": true,
+        "path": ["onboardAccount"]
+      }
+    ],
+    "data": {"onboardAccount": null}
+  },
+  "r_error_with_token": {
+    "errors": [
+      {
+        "message": "R_ERROR",
+        "checkpoints": ["addCard"],
+        "errorData": {
+          "0": {"field": "cardNumber", "code": "CARD_GENERIC_ERROR"},
+          "accessToken": "<redacted-access-token>"
+        },
+        "contingency": true,
+        "path": ["onboardAccount"]
+      }
+    ],
+    "data": {"onboardAccount": null}
+  },
+  "issuer_decline_with_token": {
+    "errors": [
+      {
+        "message": "ISSUER_DECLINE",
+        "checkpoints": ["addCard"],
+        "errorData": {
+          "0": {"field": "cardNumber", "code": "CARD_GENERIC_ERROR"},
+          "accessToken": "<redacted-access-token>"
+        },
+        "contingency": true,
+        "path": ["onboardAccount"]
+      }
+    ],
+    "data": {"onboardAccount": null}
+  },
+  "funding_non_payable": {
+    "errors": [
+      {
+        "data": {
+          "payer": {"id": "PAYER_FIXTURE", "email": "<redacted-email>"},
+          "state": "NON_PAYABLE",
+          "fundingOptions": {}
+        },
+        "path": ["checkoutSession", "fundingOptions"]
+      }
+    ]
+  },
+  "funding_restricted": {
+    "errors": [
+      {
+        "message": "PAYER_ACCOUNT_RESTRICTED",
+        "checkpoints": ["createCheckoutSession"],
+        "errorData": {"step_up_context": {}},
+        "contingency": true,
+        "path": ["checkoutSession", "fundingOptions"]
+      }
+    ]
+  },
+  "authorize_success": [
+    {
+      "data": {
+        "billing": {
+          "authorize": {
+            "billingAgreementToken": "<redacted-ba-token>",
+            "paymentAction": "SALE",
+            "returnURL": {"href": "https://merchant.invalid/return/<redacted>"},
+            "buyer": {"userId": "PAYER_FIXTURE"}
+          }
+        }
+      }
+    }
+  ],
+  "authorize_buyer_not_set": [
+    {
+      "errors": [{"message": "BUYER_NOT_SET", "path": ["billing", "authorize"]}],
+      "data": {"billing": null}
+    }
+  ]
+}
