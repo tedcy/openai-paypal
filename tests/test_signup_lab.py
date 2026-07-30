@@ -162,12 +162,11 @@ def test_passive_challenge_signals_are_observed_but_not_terminal() -> None:
     assert observed == ["tsrce_authchallenge", "passive_challenge_network"]
 
 
-def test_pay_action_labels_do_not_include_ambiguous_next_control() -> None:
+def test_pay_stage_uses_exact_application_email_form() -> None:
     source = Path(__file__).resolve().parents[1].joinpath("paypal/signup_lab.py").read_text(encoding="utf-8")
     pay_block = source.split('elif stage == "pay"', 1)[1].split('elif stage == "contact"', 1)[0]
 
-    assert 'r"create an account"' in pay_block
-    assert 'r"next"' not in pay_block
-    assert "pay_action_attempts < 3" in pay_block
-    assert 'page.locator("#phoneInput")' in pay_block
-    assert 'page.locator("#loginButton")' in pay_block
+    assert 'form[data-testid=\"emailForm\"]' in pay_block
+    assert 'button[data-testid=\"continueButton\"]' in pay_block
+    assert "pay_form_submitted = True" in pay_block
+    assert "#loginButton" not in pay_block

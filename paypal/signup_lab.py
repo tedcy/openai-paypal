@@ -355,9 +355,7 @@ class RoxySignupLab:
         completed_actions: set[str] = set()
         stage_entered_at: dict[str, float] = {}
         last_observed_challenge: tuple[str, ...] = ()
-        pay_action_attempts = 0
-        last_pay_action_at = 0.0
-        ctf_login_used = False
+        pay_form_submitted = False
         while time.monotonic() < deadline:
             page.wait_for_timeout(350)
             url = page.url
@@ -404,42 +402,26 @@ class RoxySignupLab:
                     completed_actions.add("approval_continue")
                     context.stages.append({"time": _utc_now(), "event": "approval_continue"})
                     continue
-            elif stage == "pay" and pay_action_attempts < 3:
-                # Give the page-owned risk runtime time to settle before the
-                # first navigation-producing account action. Subsequent
-                # attempts are bounded and spaced to prevent reload storms.
+            elif stage == "pay" and not pay_form_submitted:
+                # Submit the app's own create-account form once, then leave
+                # its server action and onboarding redirect in full control.
                 if time.monotonic() - stage_entered_at[stage] < 4.0:
                     continue
-                if last_pay_action_at and time.monotonic() - last_pay_action_at < 10.0:
-                    continue
-                if not ctf_login_used:
-                    phone_input = page.locator("#phoneInput")
-                    login_button = page.locator("#loginButton")
-                    try:
-                        if (
-                            phone_input.count()
-                            and phone_input.first.is_visible()
-                            and login_button.count()
-                            and login_button.first.is_visible()
-                        ):
-                            phone_input.first.fill(self.phone)
-                            login_button.first.click(timeout=5000)
-                            ctf_login_used = True
-                            pay_action_attempts += 1
-                            last_pay_action_at = time.monotonic()
-                            context.stages.append({"time": _utc_now(), "event": "ctf_login_continue", "attempt": pay_action_attempts})
-                            continue
-                    except Exception as exc:
-                        context.stages.append({"time": _utc_now(), "event": "ctf_login_control_error", "error_type": type(exc).__name__})
-                if self._click_first(page, (r"create an account", r"create account", r"sign up")):
-                    pay_action_attempts += 1
-                    last_pay_action_at = time.monotonic()
-                    context.stages.append({"time": _utc_now(), "event": "pay_create_account", "attempt": pay_action_attempts})
-                    continue
-                pay_action_attempts += 1
-                last_pay_action_at = time.monotonic()
-                self._capture_controls(page, context, f"pay_attempt_{pay_action_attempts}_missing")
-                context.stages.append({"time": _utc_now(), "event": "pay_create_account_missing", "attempt": pay_action_attempts})
+                form = page.locator('form[data-testid="emailForm"]')
+                email_input = form.locator('input[name="login_email"]')
+                continue_button = form.locator('button[data-testid="continueButton"]')
+                try:
+                    if form.count() and email_input.count() and continue_button.count():
+                        email = f"signup-lab-{int(time.time())}@example.com"
+                        email_input.first.fill(email)
+                        continue_button.first.click(timeout=5000)
+                        pay_form_submitted = True
+                        context.stages.append({"time": _utc_now(), "event": "pay_email_form_submitted"})
+                        continue
+                except Exception as exc:
+                    context.stages.append({"time": _utc_now(), "event": "pay_email_form_error", "error_type": type(exc).__name__})
+                self._capture_controls(page, context, "pay_email_form_missing")
+                raise RuntimeError("ROXY_CREATE_ACCOUNT_CONTROL_MISSING")
             elif stage == "contact" and "contact_continue" not in completed_actions:
                 phone_filled = self._fill_contact_phone(page)
                 context.stages.append({"time": _utc_now(), "event": "contact_phone", "filled": phone_filled})
