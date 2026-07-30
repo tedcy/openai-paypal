@@ -1,0 +1,19 @@
+{
+  "round": 4,
+  "mode": "reference",
+  "status": "ROXY_SIGNUP_REDIRECT_TIMEOUT",
+  "ba_hash": "8f12e34a1478b410",
+  "proxy_hash": "2fdfb6860f3e69ed",
+  "country": "US",
+  "last_stage": "pay_continue",
+  "evidence": [
+    "pay runtime settled before the account action",
+    "one account action produced no navigation",
+    "no explicit challenge page was rendered before timeout"
+  ],
+  "dead_ends": [
+    "one immediate account action with no bounded retry"
+  ],
+  "next_round_focus": "retry only the exact create-account control at bounded ten-second intervals",
+  "capture_path": "captures/signup-lab/round-004-reference"
+}
