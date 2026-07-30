@@ -1,0 +1,19 @@
+{
+  "round": 6,
+  "mode": "reference",
+  "status": "ROXY_SIGNUP_CHALLENGED",
+  "ba_hash": "8f12e34a1478b410",
+  "proxy_hash": "2fdfb6860f3e69ed",
+  "country": "US",
+  "last_stage": "pay_create_account_attempt_2_missing",
+  "evidence": [
+    "the create-account control changed to redirecting after the first action",
+    "the CTF page exposed explicit phoneInput and loginButton navigation controls",
+    "continuing to search for the old label was not a valid second action"
+  ],
+  "dead_ends": [
+    "retrying the old create-account label after the CTF control state changed"
+  ],
+  "next_round_focus": "use the explicit CTF phone and login controls once",
+  "capture_path": "captures/signup-lab/round-006-reference"
+}
