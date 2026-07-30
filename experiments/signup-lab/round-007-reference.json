@@ -1,0 +1,19 @@
+{
+  "round": 7,
+  "mode": "reference",
+  "status": "ROXY_SIGNUP_REDIRECT_TIMEOUT",
+  "ba_hash": "8f12e34a1478b410",
+  "proxy_hash": "2fdfb6860f3e69ed",
+  "country": "US",
+  "last_stage": "ctf_login_continue",
+  "evidence": [
+    "the page-provided phone and login controls executed successfully",
+    "the page also exposes an ordered profileButton as step 2",
+    "the navigator incorrectly returned to generic create-account handling before step 2"
+  ],
+  "dead_ends": [
+    "mixing the CTF helper state machine with generic PayPal fallback controls"
+  ],
+  "next_round_focus": "execute loginButton then profileButton exactly once before any fallback",
+  "capture_path": "captures/signup-lab/round-007-reference"
+}
