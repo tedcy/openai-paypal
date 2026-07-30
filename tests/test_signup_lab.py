@@ -171,4 +171,3 @@ def test_pay_action_labels_do_not_include_ambiguous_next_control() -> None:
     assert "pay_action_attempts < 3" in pay_block
     assert 'page.locator("#phoneInput")' in pay_block
     assert 'page.locator("#loginButton")' in pay_block
-    assert 'page.locator("#profileButton")' in pay_block

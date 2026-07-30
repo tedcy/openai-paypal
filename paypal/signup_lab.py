@@ -358,7 +358,6 @@ class RoxySignupLab:
         pay_action_attempts = 0
         last_pay_action_at = 0.0
         ctf_login_used = False
-        ctf_profile_used = False
         while time.monotonic() < deadline:
             page.wait_for_timeout(350)
             url = page.url
@@ -432,22 +431,6 @@ class RoxySignupLab:
                             continue
                     except Exception as exc:
                         context.stages.append({"time": _utc_now(), "event": "ctf_login_control_error", "error_type": type(exc).__name__})
-                if ctf_login_used and not ctf_profile_used:
-                    profile_button = page.locator("#profileButton")
-                    try:
-                        if profile_button.count() and profile_button.first.is_visible():
-                            profile_button.first.click(timeout=5000)
-                            ctf_profile_used = True
-                            pay_action_attempts += 1
-                            last_pay_action_at = time.monotonic()
-                            context.stages.append({"time": _utc_now(), "event": "ctf_profile_continue", "attempt": pay_action_attempts})
-                            continue
-                    except Exception as exc:
-                        context.stages.append({"time": _utc_now(), "event": "ctf_profile_control_error", "error_type": type(exc).__name__})
-                    pay_action_attempts += 1
-                    last_pay_action_at = time.monotonic()
-                    self._capture_controls(page, context, f"ctf_profile_attempt_{pay_action_attempts}_missing")
-                    continue
                 if self._click_first(page, (r"create an account", r"create account", r"sign up")):
                     pay_action_attempts += 1
                     last_pay_action_at = time.monotonic()
