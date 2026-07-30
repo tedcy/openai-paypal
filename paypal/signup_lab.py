@@ -355,6 +355,8 @@ class RoxySignupLab:
         completed_actions: set[str] = set()
         stage_entered_at: dict[str, float] = {}
         last_observed_challenge: tuple[str, ...] = ()
+        pay_action_attempts = 0
+        last_pay_action_at = 0.0
         while time.monotonic() < deadline:
             page.wait_for_timeout(350)
             url = page.url
@@ -401,14 +403,18 @@ class RoxySignupLab:
                     completed_actions.add("approval_continue")
                     context.stages.append({"time": _utc_now(), "event": "approval_continue"})
                     continue
-            elif stage == "pay" and "pay_continue" not in completed_actions:
+            elif stage == "pay" and pay_action_attempts < 3:
                 # Give the page-owned risk runtime time to settle before the
-                # single navigation-producing account action.
+                # first navigation-producing account action. Subsequent
+                # attempts are bounded and spaced to prevent reload storms.
                 if time.monotonic() - stage_entered_at[stage] < 4.0:
                     continue
-                if self._click_first(page, (r"pay with card", r"debit or credit card", r"create account", r"continue", r"next")):
-                    completed_actions.add("pay_continue")
-                    context.stages.append({"time": _utc_now(), "event": "pay_continue"})
+                if last_pay_action_at and time.monotonic() - last_pay_action_at < 10.0:
+                    continue
+                if self._click_first(page, (r"create an account", r"create account", r"sign up")):
+                    pay_action_attempts += 1
+                    last_pay_action_at = time.monotonic()
+                    context.stages.append({"time": _utc_now(), "event": "pay_create_account", "attempt": pay_action_attempts})
                     continue
             elif stage == "contact" and "contact_continue" not in completed_actions:
                 phone_filled = self._fill_contact_phone(page)
