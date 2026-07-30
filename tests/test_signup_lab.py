@@ -170,3 +170,4 @@ def test_pay_stage_uses_exact_application_email_form() -> None:
     assert 'button[data-testid=\"continueButton\"]' in pay_block
     assert "pay_form_submitted = True" in pay_block
     assert "#loginButton" not in pay_block
+    assert "pay_create_account_view_selected" in pay_block

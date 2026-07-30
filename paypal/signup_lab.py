@@ -355,6 +355,7 @@ class RoxySignupLab:
         completed_actions: set[str] = set()
         stage_entered_at: dict[str, float] = {}
         last_observed_challenge: tuple[str, ...] = ()
+        pay_create_account_selected = False
         pay_form_submitted = False
         while time.monotonic() < deadline:
             page.wait_for_timeout(350)
@@ -403,11 +404,16 @@ class RoxySignupLab:
                     context.stages.append({"time": _utc_now(), "event": "approval_continue"})
                     continue
             elif stage == "pay" and not pay_form_submitted:
-                # Submit the app's own create-account form once, then leave
-                # its server action and onboarding redirect in full control.
+                # The login and create-account views share /pay. Switch the
+                # DOM view once, then submit the app-owned email form once.
                 if time.monotonic() - stage_entered_at[stage] < 4.0:
                     continue
                 form = page.locator('form[data-testid="emailForm"]')
+                if not form.count() and not pay_create_account_selected:
+                    if self._click_first(page, (r"create an account", r"create account")):
+                        pay_create_account_selected = True
+                        context.stages.append({"time": _utc_now(), "event": "pay_create_account_view_selected"})
+                        continue
                 email_input = form.locator('input[name="login_email"]')
                 continue_button = form.locator('button[data-testid="continueButton"]')
                 try:
@@ -420,8 +426,9 @@ class RoxySignupLab:
                         continue
                 except Exception as exc:
                     context.stages.append({"time": _utc_now(), "event": "pay_email_form_error", "error_type": type(exc).__name__})
-                self._capture_controls(page, context, "pay_email_form_missing")
-                raise RuntimeError("ROXY_CREATE_ACCOUNT_CONTROL_MISSING")
+                if pay_create_account_selected and time.monotonic() - stage_entered_at[stage] > 20.0:
+                    self._capture_controls(page, context, "pay_email_form_missing")
+                    raise RuntimeError("ROXY_CREATE_ACCOUNT_CONTROL_MISSING")
             elif stage == "contact" and "contact_continue" not in completed_actions:
                 phone_filled = self._fill_contact_phone(page)
                 context.stages.append({"time": _utc_now(), "event": "contact_phone", "filled": phone_filled})
