@@ -1,0 +1,17 @@
+{
+  "round": 3,
+  "mode": "reference",
+  "status": "ROXY_SIGNUP_CHALLENGED",
+  "ba_hash": "8f12e34a1478b410",
+  "proxy_hash": "2fdfb6860f3e69ed",
+  "country": "US",
+  "last_stage": "pay_continue",
+  "evidence": [
+    "passive challenge was allowed to settle",
+    "the page later rendered an explicit security challenge",
+    "create-account was clicked approximately 100ms after pay controls appeared"
+  ],
+  "dead_ends": [],
+  "next_round_focus": "wait for pay page and passive telemetry stability before the single create-account action",
+  "capture_path": "captures/signup-lab/round-003-reference"
+}
