@@ -12,7 +12,7 @@ import urllib.parse
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Mapping, cast
 
 import httpx
 from loguru import logger
@@ -132,6 +132,33 @@ def _roxy_timezone_value(timezone_name: str, offset_minutes: int) -> str:
     signed_minutes = abs(signed_minutes)
     hours, minutes = divmod(signed_minutes, 60)
     return f"GMT{sign}{hours:02d}:{minutes:02d} {timezone_name}"
+
+
+# RoxyBrowser validates fingerInfo.timeZone against its appendix.  These are
+# canonical appendix values, not a JavaScript Date#getTimezoneOffset value:
+# the appendix lists America/Chicago as GMT-06:00 even while US DST is active.
+# Keep this separate from the task browser profile, whose offset must remain
+# dynamic for the protocol telemetry.
+_ROXY_TIMEZONE_VALUES: dict[str, str] = {
+    "America/Sao_Paulo": "GMT-03:00 America/Sao_Paulo",
+    "Asia/Bangkok": "GMT+07:00 Asia/Bangkok",
+    "Europe/Sarajevo": "GMT+01:00 Europe/Sarajevo",
+    "America/Chicago": "GMT-06:00 America/Chicago",
+}
+
+
+def roxy_timezone_value(browser_profile: Mapping[str, object] | None = None) -> str:
+    """Return the Roxy appendix timezone for a supported task profile."""
+    profile = browser_profile or {}
+    timezone_name = str(profile.get("timezone") or "").strip()
+    if not timezone_name:
+        timezone_name = str(BROWSER_PROFILE.get("timezone") or "").strip()
+    try:
+        return _ROXY_TIMEZONE_VALUES[timezone_name]
+    except KeyError as exc:
+        raise RoxyFingerprintError(
+            f"Roxy has no configured appendix timezone for {timezone_name!r}"
+        ) from exc
 
 
 def _roxy_proxy_info(proxy_url: str) -> dict[str, Any]:
@@ -327,9 +354,9 @@ class RoxyCaptureConfig:
     open_height: int = 768
     screen_width: int = 1536
     screen_height: int = 864
-    language: str = "pt-BR"
-    display_language: str = "pt-BR"
-    timezone: str = "America/Sao_Paulo"
+    language: str = "en-US"
+    display_language: str = "en-US"
+    timezone: str = "UTC"
     follow_ip: bool = False
     core_version: str = ""
     os_name: str = "Windows"
@@ -337,7 +364,10 @@ class RoxyCaptureConfig:
     proxy_url: str = ""
 
 
-def load_roxy_capture_config(proxy_url: str | None = None) -> RoxyCaptureConfig:
+def load_roxy_capture_config(
+    proxy_url: str | None = None,
+    browser_profile: Mapping[str, object] | None = None,
+) -> RoxyCaptureConfig:
     port = _env_int("PAYPAL_ROXY_API_PORT", ROXY_API_PORT) or ROXY_API_PORT
     host = _env_str("PAYPAL_ROXY_API_HOST", ROXY_API_HOST)
     api_base = (
@@ -345,11 +375,11 @@ def load_roxy_capture_config(proxy_url: str | None = None) -> RoxyCaptureConfig:
         or _env_str("ROXY_API_BASE")
         or f"http://{host}:{port}"
     ).rstrip("/")
-    language = str(BROWSER_PROFILE.get("language") or "pt-BR")
-    timezone = _roxy_timezone_value(
-        str(BROWSER_PROFILE.get("timezone") or "America/Sao_Paulo"),
-        int(BROWSER_PROFILE.get("timezone_offset_minutes") or 180),
-    )
+    selected_profile = dict(BROWSER_PROFILE)
+    if browser_profile:
+        selected_profile.update(browser_profile)
+    language = str(selected_profile.get("language") or BROWSER_PROFILE.get("language") or "en-US")
+    timezone = roxy_timezone_value(selected_profile)
     headless = _env_bool("PAYPAL_ROXY_HEADLESS", ROXY_HEADLESS)
     return RoxyCaptureConfig(
         api_base=api_base,
@@ -755,12 +785,19 @@ class RoxyApiClient:
                 exc,
             )
             for p in self.list_profiles(workspace_id):
+                profile_project_id = _first_int(
+                    p.get("projectId"),
+                    p.get("project_id"),
+                )
+                if project_id is not None and profile_project_id != project_id:
+                    continue
                 dir_id = (p.get("dirId") or p.get("dir_id") or "").strip()
                 if dir_id:
                     logger.info("Reusing existing profile: {}", dir_id)
                     return dir_id
             raise RoxyFingerprintError(
-                "Roxy 无可复用的已有窗口，请等待每日限制重置后再试"
+                f"Roxy workspace {workspace_id} project {project_id} 无可复用的已有窗口；"
+                "请释放一个窗口额度，或先在目标 project 中创建一个窗口"
             )
 
 
@@ -889,14 +926,14 @@ def _sec_ch_arch(ua_data: dict[str, Any] | None) -> str:
 
 
 def _locale_from_language(language: str) -> str:
-    value = (language or str(BROWSER_PROFILE.get("language") or "pt-BR")).strip()
+    value = (language or str(BROWSER_PROFILE.get("language") or "en-US")).strip()
     return value.replace("-", "_")
 
 
 def _country_from_locale(locale: str) -> str:
     if "_" in locale:
         return locale.rsplit("_", 1)[-1].upper()
-    return str(BROWSER_PROFILE.get("country") or "BR")
+    return str(BROWSER_PROFILE.get("country") or "")
 
 
 def _connect_over_cdp(cdp_info: dict[str, Any]) -> str:
@@ -1738,7 +1775,7 @@ def _runtime_to_profile(js: dict[str, Any], cdp_info: dict[str, Any]) -> dict[st
     ua_data = js.get("uaData") if isinstance(js.get("uaData"), dict) else None
     major = _parse_chrome_major(user_agent, int(BROWSER_PROFILE.get("chrome_major") or 150))
     full_version = _full_version_from_ua_data(ua_data, user_agent, major)
-    language = str(js.get("language") or BROWSER_PROFILE.get("language") or "pt-BR")
+    language = str(js.get("language") or BROWSER_PROFILE.get("language") or "en-US")
     locale = _locale_from_language(language)
     timezone_offset_minutes = int(js.get("timezoneOffsetMinutes") or BROWSER_PROFILE.get("timezone_offset_minutes") or 0)
     connection = _dict_value(js.get("connection"))
@@ -1753,7 +1790,7 @@ def _runtime_to_profile(js: dict[str, Any], cdp_info: dict[str, Any]) -> dict[st
             "country": _env_str("PAYPAL_ROXY_COUNTRY", _country_from_locale(locale)),
             "language": language,
             "locale": locale,
-            "timezone": str(js.get("timezone") or BROWSER_PROFILE.get("timezone") or "America/Sao_Paulo"),
+            "timezone": str(js.get("timezone") or BROWSER_PROFILE.get("timezone") or "UTC"),
             "timezone_offset_minutes": timezone_offset_minutes,
             "timezone_offset_ms": timezone_offset_minutes * 60 * 1000,
             "dst": bool(BROWSER_PROFILE.get("dst", False)),
@@ -1850,8 +1887,12 @@ def capture_roxy_runtime_profile(
     *,
     keep_browser: bool = False,
     proxy_url: str | None = None,
+    browser_profile: Mapping[str, object] | None = None,
 ) -> dict[str, Any]:
-    config = config or load_roxy_capture_config(proxy_url=proxy_url)
+    config = config or load_roxy_capture_config(
+        proxy_url=proxy_url,
+        browser_profile=browser_profile,
+    )
     if proxy_url is not None:
         config.proxy_url = _canonical_proxy_url(proxy_url)
     if keep_browser:
@@ -1871,6 +1912,19 @@ def capture_roxy_runtime_profile(
             close_browser=not keep_browser,
         )
         profile = _runtime_to_profile(js, cdp_info)
+        if browser_profile:
+            for key in (
+                "country",
+                "language",
+                "locale",
+                "graphql_language",
+                "timezone",
+                "timezone_offset_minutes",
+                "timezone_offset_ms",
+                "dst",
+            ):
+                if key in browser_profile:
+                    profile[key] = browser_profile[key]
         runtime = {
             "browser_profile": profile,
             "screen": _runtime_screen(js),

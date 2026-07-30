@@ -608,19 +608,24 @@ def _headless_fallback_to_random_enabled() -> bool:
     return value in {"", "1", "true", "yes", "on", "random", "program", "python", "synthetic"}
 
 
-def _generate_synthetic_runtime_profile() -> JsonDict:
+def _generate_synthetic_runtime_profile(
+    seed_browser_profile: Mapping[str, object] | None = None,
+) -> JsonDict:
     """Generate one stable synthetic browser/device profile for a single protocol run."""
     randomize = os.getenv(
         "PAYPAL_RANDOMIZE_BROWSER_PROFILE",
         "1",
     ).strip().lower() not in {"0", "false", "no", "off", "fixed", "disabled", "disable"}
+    configured_profile: JsonDict = dict(BROWSER_PROFILE)
+    if seed_browser_profile:
+        configured_profile.update(seed_browser_profile)
     if randomize:
         chrome_full_version = _random_chrome_full_version()
         chrome_major = _chrome_major_from_version(chrome_full_version)
     else:
-        chrome_major = int(BROWSER_PROFILE.get("chrome_major") or 150)
+        chrome_major = int(configured_profile.get("chrome_major") or 150)
         chrome_full_version = str(
-            BROWSER_PROFILE.get("chrome_full_version")
+            configured_profile.get("chrome_full_version")
             or f"{chrome_major}.0.0.0"
         )
     if randomize:
@@ -642,19 +647,19 @@ def _generate_synthetic_runtime_profile() -> JsonDict:
         screen = dict(SCREEN)
         viewport = dict(VIEWPORT)
         gpu = {
-            "gpu_vendor": BROWSER_PROFILE.get("gpu_vendor"),
-            "gpu_renderer": BROWSER_PROFILE.get("gpu_renderer"),
-            "webgl_vendor": BROWSER_PROFILE.get("webgl_vendor"),
-            "webgl_renderer": BROWSER_PROFILE.get("webgl_renderer"),
+            "gpu_vendor": configured_profile.get("gpu_vendor"),
+            "gpu_renderer": configured_profile.get("gpu_renderer"),
+            "webgl_vendor": configured_profile.get("webgl_vendor"),
+            "webgl_renderer": configured_profile.get("webgl_renderer"),
         }
-        hardware_concurrency = int(BROWSER_PROFILE.get("hardware_concurrency") or 8)
-        device_pixel_ratio = BROWSER_PROFILE.get("device_pixel_ratio", 1)
-        connection_rtt = str(BROWSER_PROFILE.get("connection_rtt") or "150")
-        connection_downlink = str(BROWSER_PROFILE.get("connection_downlink") or "10")
-    device_memory = int(BROWSER_PROFILE.get("device_memory") or 8)
-    profile: JsonDict = dict(BROWSER_PROFILE)
+        hardware_concurrency = int(configured_profile.get("hardware_concurrency") or 8)
+        device_pixel_ratio = configured_profile.get("device_pixel_ratio", 1)
+        connection_rtt = str(configured_profile.get("connection_rtt") or "150")
+        connection_downlink = str(configured_profile.get("connection_downlink") or "10")
+    device_memory = int(configured_profile.get("device_memory") or 8)
+    profile: JsonDict = dict(configured_profile)
     profile.update(gpu)
-    user_agent = _user_agent_with_chrome_version(str(BROWSER_PROFILE.get("user_agent") or USER_AGENT), chrome_full_version)
+    user_agent = _user_agent_with_chrome_version(str(configured_profile.get("user_agent") or USER_AGENT), chrome_full_version)
     profile.update(
         {
             "fingerprint_source": "random",
@@ -682,6 +687,7 @@ def generate_runtime_profile(
     *,
     roxy_proxy_url: str | None = None,
     keep_roxy_browser: bool = False,
+    browser_profile: Mapping[str, object] | None = None,
 ) -> JsonDict:
     """Generate one stable browser/device profile for a single protocol run.
 
@@ -710,6 +716,7 @@ def generate_runtime_profile(
             runtime = capture_roxy_runtime_profile(
                 keep_browser=keep_browser,
                 proxy_url=roxy_proxy_url,
+                browser_profile=browser_profile,
             )
             runtime["browser_profile"]["fingerprint_source"] = "roxy"
             runtime["device_fingerprint"]["source"] = "roxy"
@@ -744,7 +751,7 @@ def generate_runtime_profile(
             from paypal.local_headless import capture_runtime_fingerprint_with_local_headless
 
             logger.info("Generating browser fingerprint from local headless runtime...")
-            headless_seed = _generate_synthetic_runtime_profile()
+            headless_seed = _generate_synthetic_runtime_profile(browser_profile)
             runtime = capture_runtime_fingerprint_with_local_headless(
                 proxy_url=roxy_proxy_url or "",
                 browser_profile=cast(JsonDict, headless_seed["browser_profile"]),
@@ -783,7 +790,7 @@ def generate_runtime_profile(
             except Exception:
                 pass
 
-    return _generate_synthetic_runtime_profile()
+    return _generate_synthetic_runtime_profile(browser_profile)
 
 
 def ensure_runtime_profile(
@@ -792,6 +799,7 @@ def ensure_runtime_profile(
     *,
     roxy_proxy_url: str | None = None,
     keep_roxy_browser: bool = False,
+    browser_profile: Mapping[str, object] | None = None,
 ) -> None:
     if not state:
         return
@@ -801,6 +809,7 @@ def ensure_runtime_profile(
         source,
         roxy_proxy_url=roxy_proxy_url,
         keep_roxy_browser=keep_roxy_browser,
+        browser_profile=browser_profile,
     )
     state.browser_profile = runtime["browser_profile"]
     state.screen = runtime["screen"]

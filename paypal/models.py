@@ -6,6 +6,8 @@ import time
 import uuid
 from typing import TypedDict
 
+from paypal.country import CountryProfile, phone_parts, profile_for_country, profile_for_phone
+
 
 @dataclass
 class UserInfo:
@@ -17,7 +19,7 @@ class UserInfo:
     phone_country_code: str
     password: str
     dob: str  # DD/MM/YYYY
-    cpf: str  # XXX.XXX.XXX-XX
+    cpf: str | None  # BR only: XXX.XXX.XXX-XX
 
 
 @dataclass
@@ -34,7 +36,7 @@ class BillingAddress:
     house_number: str
     district: str
     city: str
-    state: str
+    state: str | None
     postal_code: str
     country: str = "BR"
 
@@ -109,6 +111,8 @@ class SessionState:
     fpti_calc: str = field(default_factory=lambda: uuid.uuid4().hex[:13])
     datadog_session_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     datadog_view_ids: dict[str, object] = field(default_factory=dict)
+    signup_committed: bool = False
+    funding_context_status: str = ""
 
     def update_from_cookies(self, cookies: dict[str, str]) -> None:
         if "nsid" in cookies:
@@ -126,10 +130,12 @@ class SessionState:
             self.euat_token = cookies[euat_key]
 
 
-def generate_random_email() -> str:
-    first = random.choice(_BR_FIRST_NAMES).lower()
-    last = random.choice(_BR_LAST_NAMES).lower()
-    return _generate_br_email(first, last)
+def generate_random_email(profile: CountryProfile | None = None) -> str:
+    selected = profile or profile_for_country("BR")
+    first_names, last_names = _name_lists(selected)
+    first = random.choice(first_names).lower()
+    last = random.choice(last_names).lower()
+    return _generate_email(first, last, selected)
 
 
 def generate_eteid() -> list[int | None]:
@@ -279,7 +285,7 @@ _BR_STREETS_BY_CITY = {
     "Joinville": ["Rua XV de Novembro", "Rua Blumenau", "Avenida Getulio Vargas", "Rua do Principe", "Rua Otto Boehm"],
 }
 
-_BR_CARD_BINS = [
+_CTF_CARD_BINS = [
     ("414709", 16, "VISA"),
     ("516292", 16, "MASTER_CARD"),
 ]
@@ -288,6 +294,74 @@ _BR_EMAIL_DOMAINS = [
     "gmail.com", "hotmail.com", "outlook.com", "yahoo.com.br",
     "icloud.com", "uol.com.br", "bol.com.br",
 ]
+
+_INTL_EMAIL_DOMAINS = ["gmail.com", "outlook.com", "hotmail.com", "icloud.com"]
+
+_TH_FIRST_NAMES = [
+    "Anan", "Arthit", "Chai", "Kiet", "Narin", "Preecha", "Sakda",
+    "Somchai", "Thanawat", "Virote", "Achara", "Kanya", "Lalita",
+    "Malee", "Nok", "Pim", "Siriporn", "Suda", "Wanwisa", "Ying",
+]
+_TH_LAST_NAMES = [
+    "Boonmee", "Chaiyasit", "Intarasuk", "Kanchana", "Kittipong",
+    "Lertchai", "Maneerat", "Nopparat", "Phromdee", "Rattanakul",
+    "Saelim", "Srisuk", "Sukhum", "Thanom", "Wattanakul",
+]
+
+_BA_FIRST_NAMES = [
+    "Adnan", "Amar", "Armin", "Damir", "Emir", "Haris", "Jasmin",
+    "Kenan", "Mirza", "Tarik", "Amina", "Emina", "Lejla", "Merima",
+    "Nermina", "Sabina", "Selma", "Zana",
+]
+_BA_LAST_NAMES = [
+    "Basic", "Begic", "Dedic", "Hadziavdic", "Hodzic", "Ibrahimovic",
+    "Kadic", "Kovacevic", "Mehic", "Music", "Osmanovic", "Salihovic",
+    "Selimovic", "Softic", "Susic",
+]
+
+_US_FIRST_NAMES = [
+    "James", "John", "Robert", "Michael", "William", "David", "Richard",
+    "Joseph", "Thomas", "Daniel", "Mary", "Patricia", "Jennifer", "Linda",
+    "Elizabeth", "Barbara", "Susan", "Jessica", "Sarah", "Karen",
+]
+_US_LAST_NAMES = [
+    "Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia", "Miller",
+    "Davis", "Rodriguez", "Martinez", "Hernandez", "Lopez", "Gonzalez",
+    "Wilson", "Anderson", "Thomas", "Taylor", "Moore", "Jackson", "Martin",
+]
+
+_TH_ADDRESSES = [
+    ("Sukhumvit Road", "Khlong Toei", "Bangkok", "Bangkok", "10110"),
+    ("Silom Road", "Bang Rak", "Bangkok", "Bangkok", "10500"),
+    ("Nimmanahaeminda Road", "Suthep", "Chiang Mai", "Chiang Mai", "50200"),
+    ("Pattaya Sai Song Road", "Nong Prue", "Pattaya", "Chon Buri", "20150"),
+    ("Yaowarat Road", "Talat Yai", "Phuket", "Phuket", "83000"),
+]
+
+_BA_ADDRESSES = [
+    ("Zmaja od Bosne", "Novo Sarajevo", "Sarajevo", None, "71000"),
+    ("Marsala Tita", "Centar", "Sarajevo", None, "71000"),
+    ("Kralja Petra I Karadordevica", "Centar", "Banja Luka", None, "78000"),
+    ("Bulevar Mira", "Centar", "Brcko", None, "76100"),
+    ("Kneza Branimira", "Centar", "Mostar", None, "88000"),
+]
+
+# Keep generated US addresses within the America/Chicago timezone used by the
+# browser profile so address, locale and risk telemetry remain internally
+# consistent. House numbers are generated separately.
+_US_ADDRESSES = [
+    ("Michigan Avenue", "Near North Side", "Chicago", "IL", "60611"),
+    ("State Street", "Loop", "Chicago", "IL", "60602"),
+    ("West Wisconsin Avenue", "Westown", "Milwaukee", "WI", "53203"),
+    ("Nicollet Mall", "Downtown West", "Minneapolis", "MN", "55402"),
+    ("Main Street", "Downtown", "Kansas City", "MO", "64106"),
+]
+
+_MANUAL_ADDRESSES = {
+    "TH": _TH_ADDRESSES,
+    "BA": _BA_ADDRESSES,
+    "US": _US_ADDRESSES,
+}
 
 
 def _luhn_checksum(partial: str) -> int:
@@ -312,9 +386,27 @@ def _generate_br_email(first_name: str, last_name: str) -> str:
     )
 
 
+def _name_lists(profile: CountryProfile) -> tuple[list[str], list[str]]:
+    if profile.country == "TH":
+        return _TH_FIRST_NAMES, _TH_LAST_NAMES
+    if profile.country == "BA":
+        return _BA_FIRST_NAMES, _BA_LAST_NAMES
+    if profile.country == "US":
+        return _US_FIRST_NAMES, _US_LAST_NAMES
+    return _BR_FIRST_NAMES, _BR_LAST_NAMES
+
+
+def _generate_email(first_name: str, last_name: str, profile: CountryProfile) -> str:
+    domains = _BR_EMAIL_DOMAINS if profile.country == "BR" else _INTL_EMAIL_DOMAINS
+    return (
+        f"{first_name.lower()}.{last_name.lower()}"
+        f"{random.randint(10, 9999)}@{random.choice(domains)}"
+    )
+
+
 def generate_card(proxy_url: str | None = None) -> CardInfo:
     del proxy_url
-    bin_prefix, length, _issuer = random.choice(_BR_CARD_BINS)
+    bin_prefix, length, _issuer = random.choice(_CTF_CARD_BINS)
     middle_len = length - len(bin_prefix) - 1
     partial = bin_prefix + "".join(str(random.randint(0, 9)) for _ in range(middle_len))
     number = partial + str(_luhn_checksum(partial))
@@ -363,29 +455,52 @@ def generate_password() -> str:
     return "".join(pwd)
 
 
-def generate_user(phone: str) -> UserInfo:
-    first = random.choice(_BR_FIRST_NAMES)
-    last = random.choice(_BR_LAST_NAMES)
-
-    phone_local = phone.lstrip("+")
-    phone_country_code = "+55"
-    if phone_local.startswith("55"):
-        phone_local = phone_local[2:]
+def generate_user(phone: str, profile: CountryProfile | None = None) -> UserInfo:
+    selected = profile or profile_for_phone(phone)
+    normalized_phone, phone_local, detected = phone_parts(phone, expected=selected)
+    if detected.country != selected.country:  # defensive; phone_parts already checks
+        raise ValueError("phone and country profile do not match")
+    first_names, last_names = _name_lists(selected)
+    first = random.choice(first_names)
+    last = random.choice(last_names)
 
     return UserInfo(
         first_name=first,
         last_name=last,
-        email=_generate_br_email(first, last),
-        phone=phone,
+        email=_generate_email(first, last, selected),
+        phone=normalized_phone,
         phone_local=phone_local,
-        phone_country_code=phone_country_code,
+        phone_country_code=selected.dial_prefix,
         password=generate_password(),
         dob=generate_dob(),
-        cpf=generate_cpf(),
+        cpf=generate_cpf() if selected.country == "BR" else None,
     )
 
 
-def generate_address() -> BillingAddress:
+def generate_address(profile: CountryProfile | str | None = None) -> BillingAddress:
+    selected = (
+        profile_for_country(profile)
+        if isinstance(profile, str)
+        else profile or profile_for_country("BR")
+    )
+    if selected.country != "BR":
+        try:
+            rows = _MANUAL_ADDRESSES[selected.country]
+        except KeyError as exc:
+            raise ValueError(
+                f"no manual address data for country {selected.country}"
+            ) from exc
+        street, district, city, state, postal_code = random.choice(rows)
+        return BillingAddress(
+            street=street,
+            house_number=str(random.randint(8, 499)),
+            district=district,
+            city=city,
+            state=state,
+            postal_code=postal_code,
+            country=selected.country,
+        )
+
     location = random.choice(_BR_LOCATIONS)
     state = location["state"]
     city = location["city"]

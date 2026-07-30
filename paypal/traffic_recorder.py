@@ -6,6 +6,7 @@ import hashlib
 import json
 import mimetypes
 import os
+import re
 import threading
 import time
 import urllib.parse
@@ -123,6 +124,9 @@ _SENSITIVE_KEY_PARTS = (
     "securitycode",
     "cvv",
     "pin",
+    "otp",
+    "authid",
+    "challengeid",
     "clientkey",
     "accesstoken",
     "euat",
@@ -131,7 +135,78 @@ _SENSITIVE_KEY_PARTS = (
     "cpf",
     "identitydocument",
     "document",
+    "email",
+    "phone",
+    "ssrt",
+    "ctxid",
+    "clientmetadataid",
+    "sealedresult",
+    "visitortoken",
 )
+
+_SENSITIVE_QUERY_KEYS = {
+    "token",
+    "batoken",
+    "ectoken",
+    "billingagreementid",
+    "billingagreementtoken",
+    "accesstoken",
+    "code",
+    "pin",
+    "otp",
+    "password",
+    "ssrt",
+    "ctxid",
+    "cmid",
+    "clientmetadataid",
+    "correlationid",
+    "requestid",
+    "sealedresult",
+    "visitortoken",
+}
+
+
+def _mask_middle(value: str) -> str:
+    if len(value) <= 10:
+        return "<redacted>"
+    return f"{value[:4]}...{value[-4:]}"
+
+
+def _redact_url(value: str) -> str:
+    try:
+        parsed = urllib.parse.urlsplit(value or "")
+    except Exception:
+        return value
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return value
+    path = re.sub(
+        r"(?i)(?<=/)(?:acct|sa_nonce|payment_intent|pi|seti|cs)_[^/?#]+",
+        "<redacted>",
+        parsed.path,
+    )
+    query: list[tuple[str, str]] = []
+    for key, item in urllib.parse.parse_qsl(parsed.query, keep_blank_values=True):
+        compact = key.lower().replace("_", "").replace("-", "")
+        query.append((key, _mask_middle(item) if compact in _SENSITIVE_QUERY_KEYS and item else item))
+    return urllib.parse.urlunsplit(
+        (
+            parsed.scheme,
+            parsed.netloc,
+            path,
+            urllib.parse.urlencode(query),
+            "<redacted>" if parsed.fragment else "",
+        )
+    )
+
+
+def _redact_text(value: str) -> str:
+    text = re.sub(r"https?://[^\s\"'<>]+", lambda match: _redact_url(match.group(0)), value)
+    text = re.sub(r"\b(?:BA|EC)-[A-Za-z0-9]{8,80}\b", lambda match: _mask_middle(match.group(0)), text)
+    text = re.sub(r"\b[A-Za-z0-9._%+\-]{1,64}@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b", "<redacted-email>", text)
+    text = re.sub(r"\b\d{3}\.\d{3}\.\d{3}-\d{2}\b", "<redacted-document>", text)
+    text = re.sub(r"(?<!\w)(?:\d[ -]?){13,19}(?!\w)", "<redacted-digits>", text)
+    text = re.sub(r"(?<!\w)\+\d[\d(). -]{7,18}\d(?!\w)", "<redacted-phone>", text)
+    return text
 
 
 def _redact_scalar(value: Any, key: str = "") -> Any:
@@ -143,9 +218,15 @@ def _redact_scalar(value: Any, key: str = "") -> Any:
             digits = "".join(ch for ch in value if ch.isdigit())
             return f"{'*' * max(0, len(digits) - 4)}{digits[-4:]}" if len(digits) > 4 else "<redacted>"
         return "<redacted>"
-    if compact in {"token", "batoken", "ectoken", "billingagreementid"} and len(value) > 12:
+    if compact in {
+        "token",
+        "batoken",
+        "ectoken",
+        "billingagreementid",
+        "billingagreementtoken",
+    } and len(value) > 12:
         return f"{value[:6]}...{value[-4:]}"
-    return value
+    return _redact_text(value)
 
 
 def redact(value: Any, key: str = "") -> Any:
@@ -267,8 +348,11 @@ class TrafficRecorder:
         self.requests_tsv = self.network_dir / "requests.tsv"
         self.summary_file = self.root / "summary.json"
         self.meta_file = self.root / "metadata.json"
-        self.raw_bodies = _env_bool("PAYPAL_TRAFFIC_RECORD_RAW", False)
-        self.response_bodies = _env_bool("PAYPAL_TRAFFIC_RECORD_RESPONSES", False)
+        # Raw bodies can contain OTP, account, card and authorization data.
+        # The CTF recorder is intentionally metadata/hash-only even if legacy
+        # environment switches request raw capture.
+        self.raw_bodies = False
+        self.response_bodies = False
         self.max_preview = int(os.getenv("PAYPAL_TRAFFIC_PREVIEW_BYTES", "4000") or "4000")
         self._lock = threading.Lock()
         self._seq = 0
@@ -397,6 +481,7 @@ class TrafficRecorder:
         req_id = self._next_id()
         kwargs = dict(kwargs or {})
         full_url = _url_with_params(url, kwargs.get("params"))
+        safe_url = _redact_url(full_url)
         merged_headers = dict(headers or {})
         body, body_content_type, body_meta = request_body_from_kwargs(kwargs)
         content_type = (
@@ -421,7 +506,7 @@ class TrafficRecorder:
             "time": _now(),
             "type": "request",
             "method": method.upper(),
-            "url": full_url,
+            "url": safe_url,
             "headers": redact(_headers_to_dict(merged_headers)),
             "synthetic": synthetic,
             "note": note,
@@ -446,7 +531,7 @@ class TrafficRecorder:
             "id": req_id,
             "time": rec["time"],
             "method": method.upper(),
-            "url": full_url,
+            "url": safe_url,
         }
         self._write_summary("recording")
         return req_id
@@ -481,18 +566,19 @@ class TrafficRecorder:
                 body,
                 content_type,
             )
+        safe_url = _redact_url(url)
         rec = {
             "id": req_id,
             "time": _now(),
             "type": "response" if not error else "requestfailed",
             "method": method.upper(),
-            "url": url,
+            "url": safe_url,
             "status": int(status) if str(status).isdigit() else status,
             "headers": redact(headers),
             "synthetic": synthetic,
         }
         if error:
-            rec["error"] = error
+            rec["error"] = _redact_text(error)
         self._response_seq += 1
         if saved_body:
             rec["responseBody"] = {
@@ -508,7 +594,7 @@ class TrafficRecorder:
                 _now(),
                 method.upper(),
                 status,
-                url,
+                safe_url,
                 request_body,
                 saved_body.get("path", "") if saved_body else "",
                 content_type,
@@ -520,7 +606,7 @@ class TrafficRecorder:
             "id": req_id,
             "time": rec["time"],
             "method": method.upper(),
-            "url": url,
+            "url": safe_url,
             "status": rec["status"],
             "synthetic": synthetic,
         }

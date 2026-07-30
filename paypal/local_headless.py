@@ -19,6 +19,7 @@ from uuid import uuid4
 from loguru import logger
 
 from config import BROWSER_PROFILE, SCREEN, USER_AGENT, VIEWPORT
+from paypal.country import accept_language_value
 
 
 JsonObject = dict[str, object]
@@ -156,6 +157,9 @@ _DEBUG_SENSITIVE_KEY_PARTS = (
     "securitycode",
     "cvv",
     "pin",
+    "otp",
+    "authid",
+    "challengeid",
     "clientkey",
     "accesstoken",
     "euat",
@@ -166,8 +170,14 @@ _DEBUG_SENSITIVE_KEY_PARTS = (
     "sealedresult",
     "visitortoken",
     "correlationid",
+    "requestid",
     "clientmetadataid",
+    "ctxid",
+    "ssrt",
     "batoken",
+    "ectoken",
+    "phone",
+    "email",
 )
 
 
@@ -270,13 +280,13 @@ def _sec_ch_arch(ua_data: JsonObject) -> str:
 
 
 def _locale_from_language(language: str) -> str:
-    return (language or str(BROWSER_PROFILE.get("language") or "pt-BR")).replace("-", "_")
+    return (language or str(BROWSER_PROFILE.get("language") or "en-US")).replace("-", "_")
 
 
 def _country_from_locale(locale: str) -> str:
     if "_" in locale:
         return locale.rsplit("_", 1)[-1].upper()
-    return str(BROWSER_PROFILE.get("country") or "BR")
+    return str(BROWSER_PROFILE.get("country") or "")
 
 
 def _runtime_screen(js: JsonObject) -> JsonObject:
@@ -309,7 +319,7 @@ def _runtime_browser_profile(js: JsonObject, seed_profile: JsonObject | None = N
     platform = _str_value(js.get("platform"), str(BROWSER_PROFILE.get("platform") or "Linux x86_64"))
     seed = seed_profile or {}
     chrome_major = _parse_chrome_major(user_agent, _int_value(seed.get("chrome_major"), _int_value(BROWSER_PROFILE.get("chrome_major"), 150)))
-    language = _str_value(js.get("language"), str(BROWSER_PROFILE.get("language") or "pt-BR"))
+    language = _str_value(js.get("language"), str(BROWSER_PROFILE.get("language") or "en-US"))
     locale = _locale_from_language(language)
     timezone_offset_minutes = _int_value(js.get("timezoneOffsetMinutes"), _int_value(BROWSER_PROFILE.get("timezone_offset_minutes"), 180))
     profile: JsonObject = dict(cast(JsonObject, BROWSER_PROFILE))
@@ -320,7 +330,7 @@ def _runtime_browser_profile(js: JsonObject, seed_profile: JsonObject | None = N
             "language": language,
             "languages": _list_value(js.get("languages")) or [language, language.split("-", 1)[0], "en-US", "en"],
             "locale": locale,
-            "timezone": _str_value(js.get("timezone"), str(BROWSER_PROFILE.get("timezone") or "America/Sao_Paulo")),
+            "timezone": _str_value(js.get("timezone"), str(BROWSER_PROFILE.get("timezone") or "UTC")),
             "timezone_offset_minutes": timezone_offset_minutes,
             "timezone_offset_ms": timezone_offset_minutes * 60 * 1000,
             "dst": bool(BROWSER_PROFILE.get("dst", False)),
@@ -466,7 +476,7 @@ def _context_options(
     profile = _merged_context_dict(BROWSER_PROFILE, browser_profile)
     viewport_options = _merged_context_dict(VIEWPORT, viewport)
     screen_options = _merged_context_dict(SCREEN, screen)
-    language = str(profile.get("language") or "pt-BR")
+    language = str(profile.get("language") or BROWSER_PROFILE.get("language") or "en-US")
     return {
         "user_agent": str(profile.get("user_agent") or USER_AGENT),
         "viewport": {
@@ -478,7 +488,7 @@ def _context_options(
             "height": _int_value(screen_options.get("height"), 864),
         },
         "locale": language,
-        "timezone_id": str(profile.get("timezone") or "America/Sao_Paulo"),
+        "timezone_id": str(profile.get("timezone") or BROWSER_PROFILE.get("timezone") or "UTC"),
         "device_scale_factor": _float_value(profile.get("device_pixel_ratio"), 1.0),
         "is_mobile": False,
         "has_touch": False,
@@ -545,8 +555,9 @@ def _js_native_function_source(name: str) -> str:
 
 
 def _headless_cookie_cache_enabled() -> bool:
-    raw = _env_text("PAYPAL_HEADLESS_COOKIE_CACHE", "PAYPAL_LOCAL_HEADLESS_COOKIE_CACHE").strip().lower()
-    return raw not in {"0", "false", "no", "off", "disabled", "disable"}
+    # Cookies remain in the current task's browser/session only. Persisting
+    # auth/risk cookies across runs violates the CTF no-secrets-at-rest rule.
+    return False
 
 
 def _headless_cookie_cache_path() -> Path:
@@ -712,11 +723,11 @@ def _sec_ch_ua_header_from_metadata(metadata: JsonObject, *, full: bool = False)
 
 def _headless_extra_http_headers(profile: JsonObject) -> dict[str, str]:
     metadata = _chrome_user_agent_metadata(profile)
-    language = str(profile.get("language") or "pt-BR")
+    language = str(profile.get("language") or BROWSER_PROFILE.get("language") or "en-US")
     bitness = str(metadata.get("bitness") or profile.get("sec_ch_bitness") or "64")
     platform_version = str(metadata.get("platformVersion") or profile.get("sec_ch_platform_version") or "").strip('"')
     return {
-        "Accept-Language": f"{language},pt;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Accept-Language": accept_language_value(language),
         "Sec-CH-UA": _sec_ch_ua_header_from_metadata(metadata),
         "Sec-CH-UA-Mobile": "?0",
         "Sec-CH-UA-Platform": str(profile.get("sec_ch_platform") or '"Linux"'),
@@ -739,7 +750,7 @@ def _stealth_init_script(
     profile = _merged_context_dict(BROWSER_PROFILE, browser_profile)
     viewport_options = _merged_context_dict(VIEWPORT, viewport)
     screen_options = _merged_context_dict(SCREEN, screen)
-    language = str(profile.get("language") or "pt-BR")
+    language = str(profile.get("language") or BROWSER_PROFILE.get("language") or "en-US")
     user_agent = str(profile.get("user_agent") or USER_AGENT)
     ua_data = _ua_data_script_config(profile)
     configured_webgl_vendor = _env_text("PAYPAL_HEADLESS_WEBGL_VENDOR")
@@ -764,7 +775,7 @@ def _stealth_init_script(
         "screenAvailHeight": _int_value(screen_options.get("availHeight"), _int_value(screen_options.get("height"), 864)),
         "viewportWidth": _int_value(viewport_options.get("width"), 1365),
         "viewportHeight": _int_value(viewport_options.get("height"), 768),
-        "timezone": str(profile.get("timezone") or "America/Sao_Paulo"),
+        "timezone": str(profile.get("timezone") or BROWSER_PROFILE.get("timezone") or "UTC"),
         "webglVendor": configured_webgl_vendor or profile_gpu_vendor,
         "webglRenderer": configured_webgl_renderer or profile_gpu_renderer,
         "uaData": ua_data,
@@ -963,7 +974,7 @@ def _apply_cdp_stealth_overrides(
     browser_profile: JsonObject | None = None,
 ) -> None:
     profile = _merged_context_dict(BROWSER_PROFILE, browser_profile)
-    language = str(profile.get("language") or "pt-BR")
+    language = str(profile.get("language") or BROWSER_PROFILE.get("language") or "en-US")
     try:
         cdp = context.new_cdp_session(page)
     except Exception as exc:
@@ -974,7 +985,7 @@ def _apply_cdp_stealth_overrides(
             "Network.setUserAgentOverride",
             {
                 "userAgent": str(profile.get("user_agent") or USER_AGENT),
-                "acceptLanguage": f"{language},pt;q=0.9,en-US;q=0.8,en;q=0.7",
+                "acceptLanguage": accept_language_value(language),
                 "platform": str(profile.get("platform") or "Linux x86_64"),
                 "userAgentMetadata": _chrome_user_agent_metadata(profile),
             },
@@ -982,7 +993,10 @@ def _apply_cdp_stealth_overrides(
     except Exception as exc:
         logger.debug("Local headless UA metadata override failed: {}", exc)
     try:
-        cdp.send("Emulation.setTimezoneOverride", {"timezoneId": str(profile.get("timezone") or "America/Sao_Paulo")})
+        cdp.send(
+            "Emulation.setTimezoneOverride",
+            {"timezoneId": str(profile.get("timezone") or BROWSER_PROFILE.get("timezone") or "UTC")},
+        )
     except Exception:
         pass
     try:
@@ -1392,10 +1406,9 @@ def headless_debug_enabled() -> bool:
 
 
 def headless_optimized_raw_debug_enabled() -> bool:
-    return headless_debug_enabled() and (
-        _env_bool("PAYPAL_HEADLESS_DEBUG_RAW", False)
-        or _env_bool("PAYPAL_HEADLESS_OPTIMIZED_DEBUG_RAW", False)
-    )
+    # Request/response bodies can contain OTP, card and account material.
+    # Keep diagnostics metadata-only even when legacy raw-debug flags are set.
+    return False
 
 
 def headless_raw_debug_enabled() -> bool:
@@ -1994,7 +2007,6 @@ class LocalHeadlessSession:
         self._network_installed = False
         self._network_route_handler: Callable[[Any], None] | None = None
         self._network_mode = "restricted"
-        self._status = 0
         self._owned_pages: list[Any] = []
         self._reset_events()
 
@@ -3018,7 +3030,10 @@ class LocalHeadlessSession:
                 self._network_mode = previous_network_mode
             if not self._datadome_cookie():
                 return finalize_result(ok=False, reason="datadome_missing")
-        ran_once = run_once(reload_page=False, navigate=stage != "signup_context" or seeded_document)
+        ran_once = run_once(
+            reload_page=False,
+            navigate=stage != "signup_context" or seeded_document,
+        )
         if stage == "signup_context" and (not ran_once or datadome_challenge_present(status)):
             if datadome_bootstrap_document():
                 signup_context_bootstrap = _dict_value(self.events.get("signup_context_bootstrap"))

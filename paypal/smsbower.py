@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import os
 import re
@@ -248,28 +249,18 @@ class SMSBowerClient:
 class SMSBowerActivationStore:
     def __init__(self, path: Path | str | None = None) -> None:
         self.path = Path(path) if path is not None else _project_root() / "cache" / "smsbower_numbers.json"
+        self._data = self._empty()
 
     def _empty(self) -> dict[str, object]:
         return {"activations": [], "provider_failures": {}}
 
     def load(self) -> dict[str, object]:
-        try:
-            if not self.path.exists():
-                return self._empty()
-            data = json.loads(self.path.read_text(encoding="utf-8"))
-            if isinstance(data, dict):
-                data.setdefault("activations", [])
-                data.setdefault("provider_failures", {})
-                return data
-        except Exception as exc:
-            logger.warning("SMSBower cache read failed: {}", exc)
-        return self._empty()
+        return copy.deepcopy(self._data)
 
     def save(self, data: dict[str, object]) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp_path = self.path.with_suffix(self.path.suffix + ".tmp")
-        tmp_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-        tmp_path.replace(self.path)
+        # Activation IDs and phone numbers are task secrets. Keep retry/reuse
+        # state in memory for this process and never serialize it to disk.
+        self._data = copy.deepcopy(data)
 
     def reusable_activation(self, now: float | None = None) -> SMSBowerActivation | None:
         now = time.time() if now is None else now

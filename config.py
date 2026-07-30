@@ -1,3 +1,6 @@
+from paypal.country import browser_profile_for, profile_for_country
+
+
 USER_AGENT = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/150.0.7871.46 Safari/537.36"
@@ -14,19 +17,10 @@ SCREEN = {
 
 VIEWPORT = {"width": 1365, "height": 768}
 
-# Keep every synthetic browser signal on the same regional/device profile.
-# The checkout flow is hard-coded for Brazil, so timezone, locale, analytics,
-# FraudNet and Client-Hints must all agree.
-BROWSER_PROFILE = {
-    "country": "BR",
-    "language": "pt-BR",
-    "locale": "pt_BR",
-    "timezone": "America/Sao_Paulo",
-    # JavaScript Date#getTimezoneOffset for UTC-3 is +180 minutes.
-    "timezone_offset_minutes": 180,
-    # FraudNet p1 uses millisecond offset in the same sign as getTimezoneOffset.
-    "timezone_offset_ms": 180 * 60 * 1000,
-    "dst": False,
+# Device defaults are region-neutral. PayPalFlow overlays the selected
+# CountryProfile (including current ZoneInfo/DST values) for every task. BR is
+# retained only as the backwards-compatible default when no task exists.
+BROWSER_PROFILE = browser_profile_for(profile_for_country("BR"), {
     "chrome_major": 150,
     "chrome_full_version": "150.0.7871.46",
     "platform": "Linux x86_64",
@@ -46,7 +40,7 @@ BROWSER_PROFILE = {
     ),
     "webgl_vendor": "WebKit",
     "webgl_renderer": "WebKit WebGL",
-}
+})
 
 TEALEAF_APP_KEY = "76938917d7504ff7a962174c021690bd"
 HCAPTCHA_SITEKEY = "884d15d9-b649-4bbb-8d1c-2d6f0eed75eb"

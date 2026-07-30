@@ -167,6 +167,21 @@ query SupportedFundingSourcesQuery($token: String!, $userCountry: CountryCodes) 
 }
 """
 
+# Review-page funding lookup. Resolving `fundingOptions` is the important part:
+# payer restrictions and NON_PAYABLE contingencies are returned by that
+# resolver and classified by paypal.funding. Keep the provisional document
+# minimal until the CTF page capture confirms its exact selection set.
+BUYER_FUNDING_CONTEXT_QUERY = """
+query BuyerFundingContextQuery($token: String!) {
+  checkoutSession(token: $token) {
+    fundingOptions {
+      __typename
+    }
+    __typename
+  }
+}
+"""
+
 INSTALLMENT_OPTIONS_QUERY = """
 query InstallmentOptionsQuery($buyerCountry: CountryCodes!, $cardNumber: String!, $cardType: CardIssuerType, $token: String!) {
   getInstallmentsForOnboardingFlows(

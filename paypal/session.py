@@ -18,6 +18,7 @@ except ImportError:
 
 from loguru import logger
 from typing import Any, Optional, cast
+from paypal.country import accept_language_value
 from paypal.models import SessionState
 from paypal.traffic_recorder import get_global_traffic_recorder
 from config import USER_AGENT, BROWSER_PROFILE
@@ -64,6 +65,15 @@ _CAPTCHA_REMOVED_SOLVER_MODES = {
     "capsolver",
     "cap_solver",
 }
+
+
+def _discard_sensitive_diagnostic(
+    path: Path,
+    content: str,
+    encoding: str = "utf-8",
+) -> None:
+    """Intentionally do not persist GraphQL/challenge response material."""
+    del path, content, encoding
 
 
 def _dict_value(value: object) -> dict[str, Any]:
@@ -221,11 +231,11 @@ def build_common_headers(state: SessionState | None = None) -> dict[str, str]:
         else None
     ) or BROWSER_PROFILE)
     user_agent = str(profile.get("user_agent") or USER_AGENT)
-    language = str(profile.get("language") or "pt-BR")
+    language = str(profile.get("language") or BROWSER_PROFILE.get("language") or "en-US")
     return {
         "User-Agent": user_agent,
         "Accept": "*/*",
-        "Accept-Language": f"{language},pt;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Accept-Language": accept_language_value(language),
         "sec-ch-ua": _format_sec_ch_ua(_low_entropy_ua_brands(profile)),
         "sec-ch-ua-mobile": "?0",
         "sec-ch-ua-platform": str(profile.get("sec_ch_platform") or '"Linux"'),
@@ -311,8 +321,13 @@ def _mask_url(value: str) -> str:
         "ba_token",
         "stripe_session_id",
     )
+    path = re.sub(
+        r"(?i)(?<=/)(?:acct|sa_nonce|payment_intent|pi|seti|cs)_[^/?#]+",
+        "<redacted>",
+        parsed.path,
+    )
     query = []
-    changed = False
+    changed = path != parsed.path or bool(parsed.fragment)
     for key, item in urllib.parse.parse_qsl(parsed.query, keep_blank_values=True):
         compact = key.lower().replace("_", "").replace("-", "")
         if any(marker.replace("_", "") in compact for marker in sensitive_markers):
@@ -326,7 +341,7 @@ def _mask_url(value: str) -> str:
         (
             parsed.scheme,
             parsed.netloc,
-            parsed.path,
+            path,
             urllib.parse.urlencode(query),
             "<fragment-redacted>" if parsed.fragment else "",
         )
@@ -380,6 +395,26 @@ def _mask_inline_sensitive_pairs(value: str) -> str:
     return value
 
 
+def _mask_general_pii(value: str) -> str:
+    value = re.sub(
+        r"\b([A-Za-z0-9._%+\-]{1,64})@([A-Za-z0-9.\-]+\.[A-Za-z]{2,})\b",
+        lambda match: _mask_email(match.group(0)),
+        value,
+    )
+    value = re.sub(r"\b\d{3}\.\d{3}\.\d{3}-\d{2}\b", "<redacted-document>", value)
+    value = re.sub(
+        r"(?<!\w)(?:\d[ -]?){13,19}(?!\w)",
+        lambda match: _mask_digits(match.group(0)),
+        value,
+    )
+    value = re.sub(
+        r"(?<!\w)\+\d[\d(). -]{7,18}\d(?!\w)",
+        lambda match: _mask_digits(match.group(0)),
+        value,
+    )
+    return value
+
+
 def sanitize_for_log(value: Any, key: str = "") -> Any:
     """Remove secrets and high-risk PII before writing diagnostics."""
     if isinstance(value, dict):
@@ -392,7 +427,15 @@ def sanitize_for_log(value: Any, key: str = "") -> Any:
     lowered_key = key.lower()
     compact_key = lowered_key.replace("_", "").replace("-", "")
 
-    if compact_key in {"password", "securitycode", "cvv", "pin"}:
+    if compact_key in {
+        "password",
+        "securitycode",
+        "cvv",
+        "pin",
+        "otp",
+        "authid",
+        "challengeid",
+    }:
         return "<redacted>"
     if "authorization" in compact_key or "cookie" in compact_key:
         return "<redacted>"
@@ -422,7 +465,9 @@ def sanitize_for_log(value: Any, key: str = "") -> Any:
     if compact_key in {"phonenumber", "phone", "number"} and sum(ch.isdigit() for ch in value) >= 8:
         return _mask_digits(value)
 
-    return _mask_inline_sensitive_pairs(_mask_embedded_urls(value))
+    return _mask_general_pii(
+        _mask_inline_sensitive_pairs(_mask_embedded_urls(value))
+    )
 
 
 def _paypal_debug_id(headers: httpx.Headers) -> str:
@@ -1077,7 +1122,7 @@ class PayPalSession:
         return None
 
     def get(self, url: str, **kwargs) -> httpx.Response:
-        logger.debug(f"GET {url}")
+        logger.debug("GET {}", sanitize_for_log({"url": url})["url"])
         disable_captcha_synthetic = bool(kwargs.pop("disable_captcha_synthetic", False))
         force_captcha_synthetic = bool(kwargs.pop("force_captcha_synthetic", False))
         self._inject_high_entropy_hints(url, kwargs)
@@ -1132,7 +1177,7 @@ class PayPalSession:
         return resp
 
     def post(self, url: str, **kwargs) -> httpx.Response:
-        logger.debug(f"POST {url}")
+        logger.debug("POST {}", sanitize_for_log({"url": url})["url"])
         disable_captcha_synthetic = bool(kwargs.pop("disable_captcha_synthetic", False))
         force_captcha_synthetic = bool(kwargs.pop("force_captcha_synthetic", False))
         self._inject_high_entropy_hints(url, kwargs)
@@ -1199,7 +1244,8 @@ class PayPalSession:
                 extra_body: Optional[dict[str, object]] = None,
                 batched: bool = False,
                 endpoint: Optional[str] = None,
-                graphql_error_level: str = "ERROR") -> dict[str, object] | list[dict[str, object]]:
+                graphql_error_level: str = "ERROR",
+                require_http_success: bool = False) -> dict[str, object] | list[dict[str, object]]:
         """Send a GraphQL request to PayPal's graphql endpoint."""
         url = endpoint or "https://www.paypal.com/graphql"
         if operation_name and endpoint is None:
@@ -1229,8 +1275,8 @@ class PayPalSession:
             "X-Requested-With": "fetch",
             "PayPal-Client-Context": context_token,
             "PayPal-Client-Metadata-Id": metadata_id,
-            "X-Country": str(profile.get("country") or "BR"),
-            "X-Locale": str(profile.get("locale") or "pt_BR"),
+            "X-Country": str(profile.get("country") or BROWSER_PROFILE.get("country") or ""),
+            "X-Locale": str(profile.get("locale") or BROWSER_PROFILE.get("locale") or ""),
             "Origin": "https://www.paypal.com",
             "Referer": referer,
             "Sec-Fetch-Site": "same-origin",
@@ -1270,27 +1316,31 @@ class PayPalSession:
             len(resp.content),
             debug_id or "<missing>",
         )
+        if require_http_success and not 200 <= resp.status_code < 300:
+            raise RuntimeError(
+                f"GraphQL {operation_name} returned HTTP {resp.status_code} "
+                f"paypal_debug_id={debug_id or '<missing>'}"
+            )
 
         try:
             result = resp.json()
         except ValueError:
             text = resp.text
-            # Keep the full HTML separately for post-mortem/replay.  The log is
-            # intentionally truncated, but authchallenge hidden fields normally
-            # live near the bottom of the document.
+            # Challenge HTML can contain hidden session/account fields. Keep
+            # diagnostics in memory only and sanitize the small log preview.
             try:
                 if text.lstrip().startswith("<"):
-                    Path(f"/tmp/paypal_gql_{operation_name}_last.html").write_text(
+                    _discard_sensitive_diagnostic(Path(f"/tmp/paypal_gql_{operation_name}_last.html"),
                         text,
                         encoding="utf-8",
                     )
-                Path(f"/tmp/paypal_gql_{operation_name}_last.json").write_text(
+                _discard_sensitive_diagnostic(Path(f"/tmp/paypal_gql_{operation_name}_last.json"),
                     json.dumps(
                         {
                             "status_code": resp.status_code,
                             "paypal_debug_id": debug_id,
-                            "response_headers": dict(resp.headers),
-                            "response_head": text[:4000],
+                            "response_headers": sanitize_for_log(dict(resp.headers)),
+                            "response_head": sanitize_for_log({"body": text[:4000]})["body"],
                         },
                         ensure_ascii=False,
                         indent=2,
@@ -1306,7 +1356,7 @@ class PayPalSession:
                     operation_name,
                     resp.status_code,
                     debug_id or "<missing>",
-                    text[:1200],
+                    sanitize_for_log({"body": text[:1200]})["body"],
                 )
                 raise PayPalAuthChallenge(operation_name, resp.status_code, debug_id, text)
             logger.error(
@@ -1314,7 +1364,7 @@ class PayPalSession:
                 operation_name,
                 resp.status_code,
                 debug_id or "<missing>",
-                text[:2000],
+                sanitize_for_log({"body": text[:2000]})["body"],
             )
             raise
 

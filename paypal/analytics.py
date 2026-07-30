@@ -165,14 +165,21 @@ def send_observability_emit(session, ba_token: str):
 
 
 def send_weasley_log(session, ec_token: str, signup_url: str, event_names: list[str],
-                      country: str = "BR", lang: str = "pt",
+                      country: str | None = None, lang: str | None = None,
                       extra_payload: dict[str, object] | None = None):
     """Send checkoutweb/weasley client logger events in browser-like order."""
     if not ec_token or not event_names:
         return
 
+    profile = _profile(session)
+    country = str(country or profile.get("country") or BROWSER_PROFILE.get("country") or "")
+    lang = str(
+        lang
+        or profile.get("graphql_language")
+        or str(profile.get("language") or "en").split("-", 1)[0]
+    )
     now = int(time.time() * 1000)
-    locale = f"{lang}_{country}"
+    locale = str(profile.get("locale") or f"{lang}_{country}")
     events = []
     for i, name in enumerate(event_names):
         payload: dict[str, object] = {
@@ -347,11 +354,11 @@ def _datadog_start_session_replay_recording_manually(dd_config: dict[str, object
 
 def _datadog_device(session) -> dict[str, object]:
     profile = _profile(session)
-    locale = str(profile.get("locale", "pt_BR"))
+    locale = str(profile.get("locale") or BROWSER_PROFILE.get("locale") or "en_US")
     return {
         "locale": locale,
         "locales": [locale.replace("_", "-")],
-        "time_zone": str(profile.get("timezone", "America/Sao_Paulo")),
+        "time_zone": str(profile.get("timezone") or BROWSER_PROFILE.get("timezone") or "UTC"),
     }
 
 
@@ -408,8 +415,8 @@ def _datadog_context(session, page_url: str, dd_config: dict[str, object]) -> di
     context = {
         "token": getattr(state, "ec_token", "") or _query_value(page_url, "token"),
         "ba_token": getattr(state, "ba_token", "") or _query_value(page_url, "ba_token"),
-        "country": profile.get("country", "BR"),
-        "locale": profile.get("locale", "pt_BR"),
+        "country": profile.get("country") or BROWSER_PROFILE.get("country") or "",
+        "locale": profile.get("locale") or BROWSER_PROFILE.get("locale") or "en_US",
         "source": "paypal-checkout",
     }
     if str(dd_config["service"]) == "weasley(checkoutuinodeweb)":

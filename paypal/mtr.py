@@ -1017,6 +1017,7 @@ def _ensure_mtr_runtime_fingerprint_source(session: _MtrSession, state: _MtrStat
             source,
             roxy_proxy_url=getattr(session, "proxy_url", None) or "",
             keep_roxy_browser=source == MTR_RUNTIME_ROXY,
+            browser_profile=_profile(state),
         )
     finally:
         if previous_strict is None:
@@ -1404,7 +1405,7 @@ def _build_mtr_js_like_signals(
     dfp = _dfp(state)
     plugins = _plugin_inventory(dfp)
     languages = _profile_languages(profile)
-    language = languages[0] if languages else "pt-BR"
+    language = languages[0] if languages else "en-US"
     platform = _mtr_profile_str(profile, "platform", "Linux x86_64")
     user_agent = _str_value(profile.get("user_agent"))
     app_version = user_agent.removeprefix("Mozilla/") if user_agent.startswith("Mozilla/") else user_agent
@@ -1413,8 +1414,8 @@ def _build_mtr_js_like_signals(
     screen_width = _int_value(screen.get("width"), 1536)
     screen_height = _int_value(screen.get("height"), 864)
     color_depth = _int_value(screen.get("colorDepth"), 24)
-    timezone = _str_value(profile.get("timezone"), "America/Sao_Paulo")
-    timezone_offset = _int_value(profile.get("timezone_offset_minutes"), 180)
+    timezone = _str_value(profile.get("timezone"), "UTC")
+    timezone_offset = _int_value(profile.get("timezone_offset_minutes"), 0)
     heap_limit = _int_value(dfp.get("js_heap_size_limit"), 4_395_630_592)
     device_pixel_ratio = _float_value(profile.get("device_pixel_ratio"), 1.0)
     now_ms = _int_value(dfp.get("mtr_now_ms"), int(time.time() * 1000))
@@ -1619,7 +1620,7 @@ def _build_mtr_js_like_signals(
 
 
 def _profile_languages(profile: dict[str, object]) -> list[str]:
-    language = _str_value(profile.get("language"), "pt-BR")
+    language = _str_value(profile.get("language"), "en-US")
     language_root = language.split("-", 1)[0]
     languages = _string_list(profile.get("languages"))
     if languages:
@@ -1801,7 +1802,7 @@ def build_mtr_id_module(state: _MtrState, *, page_url: str) -> dict[str, object]
         },
         "s6": 5,
         "s7": timezone_offset,
-        "s8": _str_value(profile.get("language"), "pt-BR"),
+        "s8": _str_value(profile.get("language"), "en-US"),
         "s9": _profile_languages(profile),
         "s10": "Google Inc.",
         "s11": _int_value(profile.get("hardware_concurrency"), 8),
@@ -1920,8 +1921,8 @@ def build_mtr_si_module(state: _MtrState) -> dict[str, object]:
     return {
         "s77": {
             "integration": "paypal-checkout",
-            "locale": _str_value(profile.get("locale"), "pt_BR"),
-            "country": _str_value(profile.get("country"), "BR"),
+            "locale": _str_value(profile.get("locale"), "en_US"),
+            "country": _str_value(profile.get("country")),
             "channel": state.mtr_channel,
             "clientMetadataId": state.mtr_client_metadata_id,
             "fingerprintSource": _str_value(profile.get("fingerprint_source"), _str_value(dfp.get("source"), "random")),
@@ -2204,6 +2205,7 @@ def _send_mtr_with_roxy_browser(session: _MtrSession, state: _MtrState, *, page_
         runtime = capture_roxy_runtime_profile(
             keep_browser=True,
             proxy_url=proxy_url,
+            browser_profile=_profile(state),
         )
         roxy_browser = _dict_value(runtime.get("roxy_browser"))
         setattr(state, "roxy_browser", roxy_browser)
