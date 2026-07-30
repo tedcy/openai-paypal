@@ -69,6 +69,26 @@ async function health() {
   }
 }
 
+async function loadRuntimeDefaults() {
+  try {
+    const defaults = await api("/api/runtime-defaults");
+    const fields = {
+      fingerprint_source: "#fingerprintSource",
+      datadome_mode: "#datadomeMode",
+      mtr_runtime: "#mtrRuntime",
+    };
+    Object.entries(fields).forEach(([key, selector]) => {
+      const select = $(selector);
+      const value = String(defaults[key] || "");
+      if ([...select.options].some(option => option.value === value)) {
+        select.value = value;
+      }
+    });
+  } catch (err) {
+    toast(`读取运行模式默认值失败：${err.message}`);
+  }
+}
+
 async function refreshJobs() {
   try {
     const data = await api("/api/jobs");
@@ -121,7 +141,7 @@ function syncSmsFields() {
   const enabled = $("#smsbowerEnabled").checked;
   const phone = $("#phone");
   phone.required = !enabled;
-  phone.placeholder = enabled ? "SMSBower 自动获取，可留空" : "+5591980133818";
+  phone.placeholder = enabled ? "SMSBower 自动获取 BR 号码，可留空" : "E.164：+55… / +66… / +387… / +1…";
 }
 
 function selectJob(jobId) {
@@ -240,7 +260,7 @@ async function startJob(evt) {
         sms_provider: $("#smsbowerEnabled").checked ? "smsbower" : "manual",
         max_card_attempts: Number($("#maxCardAttempts").value || 5),
         max_flow_attempts: Number($("#maxFlowAttempts").value || 1),
-        max_authorize_attempts: Number($("#maxAuthorizeAttempts").value || 3),
+        max_authorize_attempts: Number($("#maxAuthorizeAttempts").value || 2),
         card_retry_delay_seconds: Number($("#cardRetryDelay").value || 6),
         card_retry_jitter_seconds: Number($("#cardRetryJitter").value || 2),
         debug: $("#debug").checked,
@@ -339,6 +359,7 @@ function bind() {
 
 bind();
 health();
+loadRuntimeDefaults();
 refreshJobs().then(() => pollCurrent(true));
 setInterval(health, 8000);
 setInterval(refreshJobs, 5000);

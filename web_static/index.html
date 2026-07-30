@@ -12,7 +12,7 @@
       <div>
         <p class="eyebrow">Local Web Console</p>
         <h1>PayPal 协议支付网页端</h1>
-        <p class="subtitle">填写 BA Token 后启动任务；可手动输入手机号，也可使用 SMSBower 自动接码。</p>
+        <p class="subtitle">输入 BA Token 或完整 approve URL；国家由 +55、+66、+387、+1 手机号自动识别。</p>
       </div>
       <div class="status-pill" id="serverStatus">连接中…</div>
     </header>
@@ -26,11 +26,11 @@
         <form id="runForm" autocomplete="off">
           <label>
             <span>BA Token</span>
-            <input id="baToken" name="baToken" required placeholder="BA-xxxxxxxxxxxxxxxxx" />
+            <input id="baToken" name="baToken" required placeholder="BA-... 或 https://www.paypal.com/agreements/approve?ba_token=BA-..." />
           </label>
           <label>
             <span>手机号</span>
-            <input id="phone" name="phone" required placeholder="+5591980133818" />
+            <input id="phone" name="phone" type="tel" required placeholder="E.164：+55… / +66… / +387… / +1…" />
           </label>
           <label class="check-row">
             <input id="smsbowerEnabled" name="smsbowerEnabled" type="checkbox" />
@@ -46,8 +46,8 @@
               <input id="maxFlowAttempts" name="maxFlowAttempts" type="number" min="1" max="5" value="1" />
             </label>
             <label>
-              <span>授权重试次数</span>
-              <input id="maxAuthorizeAttempts" name="maxAuthorizeAttempts" type="number" min="1" max="10" value="3" />
+              <span>授权尝试次数（最多2）</span>
+              <input id="maxAuthorizeAttempts" name="maxAuthorizeAttempts" type="number" min="1" max="2" value="2" />
             </label>
             <label>
               <span>换卡等待秒数</span>
@@ -143,7 +143,8 @@
           <button id="startBtn" class="primary" type="submit">开始执行</button>
         </form>
         <p class="hint">默认的本地 Headless 模式需要 Playwright：<code>pip install -r requirements-headless.txt &amp;&amp; python -m playwright install chromium</code>。未安装时可把上面三项切到程序随机生成、协议边缘模拟和程序模板生成。</p>
-        <p class="hint">手动模式执行到短信验证时会暂停等待输入；SMSBower 模式会自动取最低价 PayPal 巴西号码并接码。代理按每个任务生效。打开“自动记录程序发包”后会在 captures/program-paypal-* 下保存请求/响应，并可和 roxy 抓包自动生成差异报告。</p>
+        <p class="hint">手动模式执行到短信验证时会暂停等待输入；换号必须保持同一国家。SMSBower 仅支持巴西，留空手机号时默认 BR。代理按每个任务生效。</p>
+        <p class="hint">安全边界：仅可在你明确获授权的封闭 CTF 环境中运行，请勿用于真实支付系统。</p>
       </section>
 
       <section class="card jobs-card">
@@ -213,6 +214,6 @@
   </div>
 
   <div id="toast" class="toast hidden"></div>
-  <script src="/static/app.js?v=ui-wrap-1"></script>
+  <script src="/static/app.js?v=runtime-defaults-1"></script>
 </body>
 </html>

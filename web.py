@@ -28,6 +28,7 @@ from loguru import logger
 
 from paypal.flow import PayPalFlow
 from paypal.models import BillingAddress, CardInfo, UserInfo, generate_address, generate_card, generate_user
+from paypal.country import parse_ba_token, profile_for_country, profile_for_phone
 from paypal.proxy import ProxyConfig, build_proxy_config
 from paypal.traffic_recorder import (
     TrafficRecorder,
@@ -98,8 +99,7 @@ COOKIE_SECURE = env_bool("PAYPAL_WEB_COOKIE_SECURE", False)
 DEVICE_COOKIE_NAME = "paypal_web_device_id"
 DEVICE_COOKIE_MAX_AGE = 365 * 24 * 60 * 60
 DEVICE_ID_RE = re.compile(r"^[a-f0-9]{32}$")
-BA_TOKEN_RE = re.compile(r"^BA-[A-Za-z0-9]{8,80}$")
-PHONE_RE = re.compile(r"^\+?\d{8,20}$")
+PHONE_RE = re.compile(r"^\+[1-9]\d{7,14}$")
 FINGERPRINT_SOURCE_CHOICES = {"random", "program", "python", "synthetic", "roxy", "browser", "headless", "local_headless", "playwright", "local_playwright", "auto"}
 DATADOME_MODE_CHOICES = {"protocol", "edge", "roxy", "browser", "headless", "local_headless", "playwright", "local_playwright", "auto", "off"}
 MTR_RUNTIME_CHOICES = {"python_generated", "python", "protocol", "roxy", "browser", "headless", "local_headless", "playwright", "local_playwright", "auto", "block", "off"}
@@ -114,6 +114,58 @@ RATE_BUCKETS: dict[tuple[str, str], list[float]] = {}
 
 
 # ----------------------------- helpers -----------------------------
+
+
+def _dotenv_value(name: str) -> str:
+    """Read a local non-secret setting without requiring python-dotenv."""
+    value = os.getenv(name)
+    if value is not None:
+        return value.strip()
+    env_path = ROOT / ".env"
+    try:
+        lines = env_path.read_text(encoding="utf-8-sig").splitlines()
+    except OSError:
+        return ""
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, raw = stripped.split("=", 1)
+        if key.strip() != name:
+            continue
+        raw = raw.strip()
+        if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in {"'", '"'}:
+            raw = raw[1:-1]
+        return raw.strip()
+    return ""
+
+
+def _configured_mode(name: str, choices: set[str], default: str) -> str:
+    value = (_dotenv_value(name) or default).strip().lower().replace("-", "_")
+    return value if value in choices else default
+
+
+def runtime_defaults() -> dict[str, str]:
+    """Return only browser-safe runtime mode defaults for the Web form."""
+    fingerprint_source = _configured_mode(
+        "PAYPAL_FINGERPRINT_SOURCE", FINGERPRINT_SOURCE_CHOICES, "headless"
+    )
+    datadome_mode = _configured_mode(
+        "PAYPAL_DATADOME_MODE", DATADOME_MODE_CHOICES, "headless"
+    )
+    mtr_runtime = _configured_mode(
+        "PAYPAL_MTR_RUNTIME", MTR_RUNTIME_CHOICES, "headless"
+    )
+    return {
+        "fingerprint_source": fingerprint_source,
+        "datadome_mode": datadome_mode,
+        "mtr_runtime": mtr_runtime,
+        "risk_signals_mode": _configured_mode(
+            "PAYPAL_RISK_SIGNALS_MODE",
+            RISK_SIGNALS_MODE_CHOICES,
+            implicit_risk_signals_mode(fingerprint_source, datadome_mode, mtr_runtime),
+        ),
+    }
 
 
 def implicit_risk_signals_mode(
@@ -313,7 +365,7 @@ def public_generated_payload(user: UserInfo, card: CardInfo, address: BillingAdd
             "phone_local": mask_phone(user.phone_local),
             "password": "<redacted>",
             "dob": "<redacted>",
-            "cpf": "<redacted>",
+            "cpf": "<redacted>" if user.cpf else None,
         },
         "card": {
             "number": mask_card(card.number),
@@ -339,7 +391,7 @@ class WebJob:
     debug: bool = False
     max_card_attempts: int = 5
     max_flow_attempts: int = 1
-    max_authorize_attempts: int = 3
+    max_authorize_attempts: int = 2
     card_retry_delay_seconds: float = 6.0
     card_retry_jitter_seconds: float = 2.0
     proxy_enabled: bool = False
@@ -609,7 +661,7 @@ class WebPayPalFlow(PayPalFlow):
                 logger.error("Failed to initiate OTP for {}: {}", self._masked_phone(), e)
                 while True:
                     value = self._prompt_operator(
-                        "发送验证码失败。请输入新的手机号重新发送（如 +5591980133818）；输入 q 退出。"
+                        f"发送验证码失败。请输入同国家的新 E.164 手机号（{self.country_profile.dial_prefix}…）；输入 q 退出。"
                     )
                     if value.lower() in {"q", "quit", "exit"}:
                         raise RuntimeError("OTP confirmation cancelled by user") from e
@@ -624,7 +676,7 @@ class WebPayPalFlow(PayPalFlow):
 
             while True:
                 value = self._prompt_operator(
-                    "请输入6位短信验证码；如需换号，输入新手机号（如 +5591980133818 或 phone:+5591980133818）；输入 q 退出。"
+                    f"请输入6位短信验证码；如需换号，输入同国家 E.164 手机号（{self.country_profile.dial_prefix}…）；输入 q 退出。"
                 )
 
                 if value.lower() in {"q", "quit", "exit"}:
@@ -693,7 +745,7 @@ def create_job(
     max_card_attempts: int,
     sms_provider: str = "manual",
     max_flow_attempts: int = 1,
-    max_authorize_attempts: int = 3,
+    max_authorize_attempts: int = 2,
     card_retry_delay_seconds: float = 6.0,
     card_retry_jitter_seconds: float = 2.0,
     proxy_enabled: bool = False,
@@ -707,20 +759,25 @@ def create_job(
     traffic_dir: str = "",
     compare_roxy_capture: str = "",
 ) -> WebJob:
-    ba_token = (ba_token or "").strip()
-    phone = re.sub(r"[\s().-]+", "", (phone or "").strip())
+    try:
+        ba_token = parse_ba_token(ba_token)
+    except ValueError as exc:
+        raise ValueError(str(exc)) from exc
+    phone = (phone or "").strip()
     sms_provider = (sms_provider or "manual").strip().lower()
     if sms_provider not in SMS_PROVIDER_CHOICES:
         raise ValueError("短信接码方式不正确")
-    if not ba_token:
-        raise ValueError("BA Token 不能为空")
-    if not BA_TOKEN_RE.fullmatch(ba_token):
-        raise ValueError("BA Token 格式不正确")
     if not phone and sms_provider == "manual":
         raise ValueError("手机号不能为空")
     if phone and not PHONE_RE.fullmatch(phone):
-        raise ValueError("手机号格式不正确")
+        raise ValueError("手机号必须使用 E.164 格式，例如 +12025550123")
+    try:
+        country_profile = profile_for_phone(phone) if phone else profile_for_country("BR")
+    except ValueError as exc:
+        raise ValueError(str(exc)) from exc
     if sms_provider == "smsbower":
+        if country_profile.country != "BR":
+            raise ValueError("SMSBower 仅支持巴西 +55 号码")
         _build_smsbower_provider(enabled=True)
     try:
         max_card_attempts = int(max_card_attempts)
@@ -736,7 +793,7 @@ def create_job(
         max_authorize_attempts = int(max_authorize_attempts)
     except Exception as exc:
         raise ValueError("最大授权重试次数必须是数字") from exc
-    max_authorize_attempts = max(1, min(max_authorize_attempts, 10))
+    max_authorize_attempts = max(1, min(max_authorize_attempts, 2))
     try:
         card_retry_delay_seconds = float(card_retry_delay_seconds)
     except Exception as exc:
@@ -857,9 +914,14 @@ def run_job(job: WebJob) -> None:
                 logger.info("SMS provider: SMSBower auto mode")
             job.proxy_enabled = proxy_config.enabled
             job.proxy_label = proxy_config.label
-            user = generate_user(job.phone or "+5500000000000")
+            country_profile = (
+                profile_for_phone(job.phone)
+                if job.phone
+                else profile_for_country("BR")
+            )
+            user = generate_user(job.phone or "+5500000000000", country_profile)
             card = generate_card(proxy_url=proxy_config.url)
-            address = generate_address()
+            address = generate_address(country_profile)
             job.set_generated(public_generated_payload(user, card, address))
 
             logger.info("Web job started: {}", job.id)
@@ -899,6 +961,7 @@ def run_job(job: WebJob) -> None:
                 mtr_runtime=job.mtr_runtime,
                 risk_signals_mode=job.risk_signals_mode,
                 sms_provider=sms_provider,
+                country_profile=country_profile,
                 job=job,
             )
             result = flow.run()
@@ -1020,6 +1083,8 @@ class WebHandler(BaseHTTPRequestHandler):
         path = parsed.path
         if path == "/api/health":
             return self.send_json({"ok": True, "time": now_ts()})
+        if path == "/api/runtime-defaults":
+            return self.send_json(runtime_defaults())
         if path == "/api/jobs":
             device_id = self.get_device_id()
             with JOBS_LOCK:
@@ -1055,9 +1120,19 @@ class WebHandler(BaseHTTPRequestHandler):
                 return
             try:
                 data = self.read_json()
-                fingerprint_source = str(data.get("fingerprint_source", "headless") or "headless")
-                datadome_mode = str(data.get("datadome_mode", "headless") or "headless")
-                mtr_runtime = str(data.get("mtr_runtime", "headless") or "headless")
+                defaults = runtime_defaults()
+                fingerprint_source = str(
+                    data.get("fingerprint_source", defaults["fingerprint_source"])
+                    or defaults["fingerprint_source"]
+                )
+                datadome_mode = str(
+                    data.get("datadome_mode", defaults["datadome_mode"])
+                    or defaults["datadome_mode"]
+                )
+                mtr_runtime = str(
+                    data.get("mtr_runtime", defaults["mtr_runtime"])
+                    or defaults["mtr_runtime"]
+                )
                 job = create_job(
                     owner_device_id=self.get_device_id(),
                     ba_token=data.get("ba_token", ""),
@@ -1066,7 +1141,7 @@ class WebHandler(BaseHTTPRequestHandler):
                     max_card_attempts=int(data.get("max_card_attempts", 5) or 5),
                     sms_provider=str(data.get("sms_provider", "manual") or "manual"),
                     max_flow_attempts=int(data.get("max_flow_attempts", 1) or 1),
-                    max_authorize_attempts=int(data.get("max_authorize_attempts", 3) or 3),
+                    max_authorize_attempts=int(data.get("max_authorize_attempts", 2) or 2),
                     card_retry_delay_seconds=float(data.get("card_retry_delay_seconds", 6) or 0),
                     card_retry_jitter_seconds=float(data.get("card_retry_jitter_seconds", 2) or 0),
                     proxy_enabled=bool(data.get("proxy_enabled", False)),
@@ -1079,7 +1154,7 @@ class WebHandler(BaseHTTPRequestHandler):
                         fingerprint_source,
                         datadome_mode,
                         mtr_runtime,
-                        data.get("risk_signals_mode", ""),
+                        data.get("risk_signals_mode", defaults["risk_signals_mode"]),
                     ),
                     record_traffic=bool(data.get("record_traffic", False)),
                     traffic_dir=str(data.get("traffic_dir", "") or ""),

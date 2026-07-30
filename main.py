@@ -2,7 +2,7 @@
 """PayPal Billing Agreement approval automation.
 
 Usage:
-    python main.py --ba-token BA-xxx --phone +5591980133818
+    python main.py --ba-token BA-xxx --phone +12025550123
 """
 import argparse
 import importlib
@@ -13,6 +13,7 @@ from pathlib import Path
 from loguru import logger
 
 from paypal.models import generate_user, generate_card, generate_address
+from paypal.country import parse_ba_token, profile_for_country, profile_for_phone
 from paypal.flow import PayPalFlow
 from paypal.proxy import build_proxy_config
 from paypal.session import sanitize_for_log
@@ -34,18 +35,25 @@ def _build_smsbower_provider(enabled: bool, api_key: str | None):
     )
 
 
+def _sanitized_console_sink(message) -> None:
+    record = message.record
+    safe_message = sanitize_for_log({"body": str(record["message"])})["body"]
+    timestamp = record["time"].strftime("%H:%M:%S")
+    sys.stderr.write(f"{timestamp} | {record['level'].name:<8} | {safe_message}\n")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="PayPal Billing Agreement Approval Automation"
     )
     parser.add_argument(
         "--ba-token", required=True,
-        help="Billing Agreement token (e.g. BA-3AX328361P111131W)"
+        help="Billing Agreement token or agreements/approve URL"
     )
     parser.add_argument(
         "--phone",
         default="",
-        help="Phone number with country code (e.g. +5591980133818)"
+        help="E.164 phone; supported prefixes: +55, +66, +387 and +1"
     )
     parser.add_argument(
         "--smsbower",
@@ -76,8 +84,8 @@ def main():
     parser.add_argument(
         "--max-authorize-attempts",
         type=int,
-        default=3,
-        help="Max authorize retries after reloading Hermes/Hagrid review context",
+        default=2,
+        help="Authorize attempts (capped at 2: initial request plus one context refresh)",
     )
     parser.add_argument(
         "--card-retry-delay",
@@ -158,11 +166,13 @@ def main():
 
     args = parser.parse_args()
 
+    try:
+        args.ba_token = parse_ba_token(args.ba_token)
+    except ValueError as exc:
+        parser.error(str(exc))
+
     logger.remove()
-    if args.debug:
-        logger.add(sys.stderr, level="DEBUG")
-    else:
-        logger.add(sys.stderr, level="INFO")
+    logger.add(_sanitized_console_sink, level="DEBUG" if args.debug else "INFO")
     if args.datadome_mode:
         os.environ["PAYPAL_DATADOME_MODE"] = args.datadome_mode
     if args.mtr_runtime:
@@ -189,9 +199,20 @@ def main():
     if not args.phone and sms_provider is None:
         parser.error("--phone is required unless --smsbower or SMSBOWER_ENABLED=1 is set")
 
-    user = generate_user(args.phone or "+5500000000000")
+    try:
+        country_profile = (
+            profile_for_phone(args.phone)
+            if args.phone
+            else profile_for_country("BR")
+        )
+    except ValueError as exc:
+        parser.error(str(exc))
+    if sms_provider is not None and country_profile.country != "BR":
+        parser.error("SMSBower mode only supports Brazil (+55)")
+
+    user = generate_user(args.phone or "+5500000000000", country_profile)
     card = generate_card(proxy_url=proxy_config.url)
-    address = generate_address()
+    address = generate_address(country_profile)
 
     logger.info(f"User: {user.first_name} {user.last_name}")
     logger.info("Email: {}", sanitize_for_log({"email": user.email})["email"])
@@ -199,7 +220,7 @@ def main():
         logger.info("Phone: {}", sanitize_for_log({"phone": user.phone})["phone"])
     else:
         logger.info("Phone: SMSBower auto mode will reserve a Brazil PayPal number before OTP")
-    logger.info("CPF: <redacted>")
+    logger.info("CPF: {}", "<redacted>" if user.cpf else "not applicable")
     logger.info("DOB: <redacted>")
     logger.info(
         "Card: {} exp={} cvv=<redacted>",
@@ -209,25 +230,25 @@ def main():
     logger.info("Address generated: {}, {}-{}", address.district, address.city, address.state)
     logger.info(f"Proxy: {proxy_config.label}")
 
-    flow = PayPalFlow(
-        ba_token=args.ba_token,
-        user=user,
-        card=card,
-        address=address,
-        max_card_attempts=args.max_card_attempts,
-        max_flow_attempts=args.max_flow_attempts,
-        max_authorize_attempts=args.max_authorize_attempts,
-        card_retry_delay_seconds=args.card_retry_delay,
-        card_retry_jitter_seconds=args.card_retry_jitter,
-        proxy_config=proxy_config,
-        fingerprint_source=args.fingerprint_source,
-        datadome_mode=args.datadome_mode,
-        mtr_runtime=args.mtr_runtime,
-        risk_signals_mode=args.risk_signals_mode,
-        sms_provider=sms_provider,
-    )
-
     try:
+        flow = PayPalFlow(
+            ba_token=args.ba_token,
+            user=user,
+            card=card,
+            address=address,
+            max_card_attempts=args.max_card_attempts,
+            max_flow_attempts=args.max_flow_attempts,
+            max_authorize_attempts=args.max_authorize_attempts,
+            card_retry_delay_seconds=args.card_retry_delay,
+            card_retry_jitter_seconds=args.card_retry_jitter,
+            proxy_config=proxy_config,
+            fingerprint_source=args.fingerprint_source,
+            datadome_mode=args.datadome_mode,
+            mtr_runtime=args.mtr_runtime,
+            risk_signals_mode=args.risk_signals_mode,
+            sms_provider=sms_provider,
+            country_profile=country_profile,
+        )
         result = flow.run()
     finally:
         close_global_traffic_recorder()
