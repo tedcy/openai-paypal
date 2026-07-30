@@ -30,6 +30,7 @@ from paypal.roxy_fingerprint import (
     _connect_over_cdp,
     load_roxy_capture_config,
 )
+from paypal.traffic_recorder import TrafficRecorder, clear_current_traffic_recorder, set_current_traffic_recorder
 
 _CHALLENGE_MARKERS = (
     "authchallenge",
@@ -524,6 +525,14 @@ def run_signup_lab_from_file(
         _hash(ProxyEntry.parse(proxy).url),
         root,
     )
+    if mode == "cold-protocol":
+        return run_cold_protocol_signup(
+            ba_token=ba_token,
+            phone=inputs.phone,
+            proxy_line=proxy,
+            capture_root=root,
+            protocol_transport=protocol_transport,
+        )
     return RoxySignupLab(
         mode=mode,
         ba_token=ba_token,
@@ -533,3 +542,70 @@ def run_signup_lab_from_file(
         protocol_transport=protocol_transport,
         keep_profile=keep_profile,
     ).run()
+
+
+def run_cold_protocol_signup(
+    *,
+    ba_token: str,
+    phone: str,
+    proxy_line: str,
+    capture_root: str | Path,
+    protocol_transport: str = "httpx",
+) -> dict[str, Any]:
+    """Run protocol Phase 0/2 only, with no Roxy API construction or call."""
+    from paypal.flow import PayPalFlow
+    from paypal.models import generate_address, generate_card, generate_user
+    from paypal.proxy import ProxyConfig
+    from tools.compare_paypal_traffic import compare, write_markdown
+
+    root = Path(capture_root).expanduser().resolve()
+    profile = profile_for_phone(phone)
+    proxy = ProxyEntry.parse(proxy_line)
+    recorder = TrafficRecorder(root / "protocol", lab_raw=True)
+    set_current_traffic_recorder(recorder)
+    try:
+        flow = PayPalFlow(
+            ba_token=ba_token,
+            user=generate_user(phone, profile),
+            card=generate_card(proxy_url=proxy.url),
+            address=generate_address(profile),
+            proxy_config=ProxyConfig(enabled=True, entry=proxy),
+            fingerprint_source="random",
+            datadome_mode="protocol",
+            mtr_runtime="python_generated",
+            risk_signals_mode="protocol",
+            country_profile=profile,
+            protocol_transport=protocol_transport,
+        )
+        result = flow.run_until_signup()
+    finally:
+        recorder.close()
+        clear_current_traffic_recorder()
+    result.update(
+        {
+            "ba_hash": _hash(ba_token),
+            "proxy_hash": _hash(proxy.url),
+            "country": profile.country,
+            "capture_root": str(root),
+        }
+    )
+    _write_json(root / "protocol_result.json", result)
+    browser_root = root / "browser"
+    if (browser_root / "network" / "events.jsonl").exists():
+        report = compare(root / "protocol", browser_root)
+        _write_json(root / "diff" / "traffic_diff_report.json", report)
+        write_markdown(report, root / "diff" / "traffic_diff_report.md")
+    _write_json(
+        root / "checkpoint.json",
+        {
+            "status": result.get("status"),
+            "ba_hash": result["ba_hash"],
+            "proxy_hash": result["proxy_hash"],
+            "country": result["country"],
+            "http_status": result.get("http_status"),
+            "classification": result.get("classification"),
+            "roxy_api_calls": 0,
+            "capture_root": str(root),
+        },
+    )
+    return result

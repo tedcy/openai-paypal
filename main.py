@@ -196,7 +196,7 @@ def main():
     logger.remove()
     logger.add(_sanitized_console_sink, level="DEBUG" if args.debug else "INFO")
 
-    if args.signup_lab in {"reference", "handoff"}:
+    if args.signup_lab in {"reference", "handoff", "cold-protocol"}:
         from paypal.signup_lab import run_signup_lab_from_file
 
         result = run_signup_lab_from_file(

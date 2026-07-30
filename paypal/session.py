@@ -579,6 +579,7 @@ class PayPalSession:
         state: SessionState,
         proxy_url: str | None = None,
         proxy_label: str = "",
+        transport: str | None = None,
     ):
         self.state = state
         self.proxy_url = proxy_url
@@ -589,10 +590,20 @@ class PayPalSession:
         ).strip().lower() not in {"0", "false", "no", "off"}
         self._high_entropy_hints = build_high_entropy_hints(state)
         self.traffic_recorder = get_global_traffic_recorder()
-        self._use_curl = HAS_CURL_CFFI and os.getenv(
-            "PAYPAL_USE_CURL_CFFI",
-            "1",
-        ).strip().lower() not in {"0", "false", "no", "off"}
+        selected_transport = (transport or "").strip().lower()
+        if selected_transport not in {"", "httpx", "curl-chrome"}:
+            raise ValueError(f"unsupported PayPalSession transport: {transport}")
+        if selected_transport == "curl-chrome" and not HAS_CURL_CFFI:
+            raise RuntimeError("curl_cffi is required for curl-chrome transport")
+        self._use_curl = (
+            selected_transport == "curl-chrome"
+            or (
+                selected_transport == ""
+                and HAS_CURL_CFFI
+                and os.getenv("PAYPAL_USE_CURL_CFFI", "1").strip().lower()
+                not in {"0", "false", "no", "off"}
+            )
+        )
         client_kwargs: dict[str, Any] = {
             "follow_redirects": False,
             "timeout": httpx.Timeout(30.0),

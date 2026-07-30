@@ -208,6 +208,7 @@ class PayPalFlow:
         risk_signals_mode: str | None = None,
         sms_provider: SmsOtpProviderProtocol | None = None,
         country_profile: CountryProfile | None = None,
+        protocol_transport: str | None = None,
     ):
         self.ba_token = parse_ba_token(ba_token)
         self.user = user
@@ -237,6 +238,7 @@ class PayPalFlow:
         self.mtr_runtime = mtr_runtime
         self.risk_signals_mode = risk_signals_mode
         self.sms_provider = sms_provider
+        self.protocol_transport = protocol_transport
         self._requested_risk_signals_mode = self._risk_signals_mode_raw()
         self._roxy_runtime_disabled_reason = ""
         keep_roxy_browser = self._roxy_runtime_requested()
@@ -259,6 +261,7 @@ class PayPalFlow:
             self.state,
             proxy_url=self.proxy_config.url,
             proxy_label=self.proxy_config.label,
+            transport=self.protocol_transport,
         )
         self.captcha_bypass_mode = paypal_captcha_bypass_mode()
         self._used_partial_signup_token = False
@@ -2302,6 +2305,41 @@ class PayPalFlow:
         finally:
             self.close()
 
+    def run_until_signup(self) -> dict[str, object]:
+        """Execute protocol Phase 0/2 and stop before any signup mutation."""
+        from paypal.signup_lab import classify_signup_document
+
+        try:
+            self._log_flow_attempt_start(1)
+            self._phase0_initial_load()
+            self._phase2_create_account()
+            body = str(getattr(self, "_last_signup_html", "") or "")
+            url = str(getattr(self, "_last_signup_url", "") or self.state.signup_url or "")
+            status = int(getattr(self, "_last_signup_status", 0) or 0)
+            classification = classify_signup_document(
+                status,
+                "text/html" if body else "",
+                body,
+                url,
+            )
+            return {
+                "status": "protocol_signup_ready" if classification["valid"] else "signup_blocked",
+                "http_status": status,
+                "signup_url": url,
+                "classification": classification,
+                "roxy_api_calls": 0,
+            }
+        except Exception as exc:
+            return {
+                "status": "failed",
+                "error": self._safe_error_text(exc),
+                "http_status": int(getattr(self, "_last_signup_status", 0) or 0),
+                "signup_url": str(getattr(self, "_last_signup_url", "") or self.state.signup_url or ""),
+                "roxy_api_calls": 0,
+            }
+        finally:
+            self.close()
+
     def _log_flow_attempt_start(self, flow_attempt: int):
         suffix = (
             f" (attempt {flow_attempt}/{self.max_flow_attempts})"
@@ -2381,6 +2419,7 @@ class PayPalFlow:
             self.state,
             proxy_url=self.proxy_config.url,
             proxy_label=self.proxy_config.label,
+            transport=self.protocol_transport,
         )
         self.captcha_bypass_mode = paypal_captcha_bypass_mode()
         self._used_partial_signup_token = False

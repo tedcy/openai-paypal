@@ -1,8 +1,12 @@
 import json
+from pathlib import Path
 
 import pytest
+import httpx
 
 from paypal.signup_lab import SignupLabInputs, classify_signup_document
+from paypal.traffic_recorder import TrafficRecorder
+from tools.compare_paypal_traffic import compare
 
 
 def test_signup_lab_inputs_select_without_network(tmp_path) -> None:
@@ -51,3 +55,64 @@ def test_signup_lab_rejects_missing_pool(tmp_path) -> None:
 
     with pytest.raises(ValueError, match="proxy"):
         SignupLabInputs.load(source)
+
+
+def test_lab_raw_recorder_is_explicit_and_preserves_request(tmp_path) -> None:
+    recorder = TrafficRecorder(tmp_path / "protocol", lab_raw=True)
+    request_id = recorder.record_request(
+        "GET",
+        "https://www.paypal.com/checkoutweb/signup?token=EC-RAWVALUE123",
+        headers={"Cookie": "session=raw-cookie"},
+    )
+    recorder.record_response(
+        request_id,
+        "GET",
+        "https://www.paypal.com/checkoutweb/signup?token=EC-RAWVALUE123",
+        httpx.Response(200, text="checkoutweb signup"),
+    )
+    recorder.close()
+
+    persisted = (recorder.events_file).read_text(encoding="utf-8")
+    assert "EC-RAWVALUE123" in persisted
+    assert "session=raw-cookie" in persisted
+
+
+def test_compare_aligns_by_stage_method_and_path(tmp_path) -> None:
+    protocol = tmp_path / "protocol" / "network"
+    browser = tmp_path / "browser" / "network"
+    protocol.mkdir(parents=True)
+    browser.mkdir(parents=True)
+    (protocol / "events.jsonl").write_text(
+        json.dumps({"type": "request", "method": "GET", "url": "https://www.paypal.com/checkoutweb/signup?token=EC-X", "headers": {"Cookie": "a=1"}}) + "\n",
+        encoding="utf-8",
+    )
+    (browser / "events.jsonl").write_text(
+        json.dumps({"type": "requestWillBeSent", "requestId": "1", "request": {"method": "GET", "url": "https://www.paypal.com/checkoutweb/signup?token=EC-X", "headers": {"Cookie": "a=1"}}}) + "\n",
+        encoding="utf-8",
+    )
+
+    report = compare(tmp_path / "protocol", tmp_path / "browser")
+
+    assert report["protocol_requests"] == 1
+    assert report["browser_requests"] == 1
+    assert report["pairs"][0]["key"].startswith("signup:GET:")
+
+
+def test_signup_lab_contains_no_network_or_cdp_discovery() -> None:
+    root = Path(__file__).resolve().parents[1]
+    sources = "\n".join(
+        (root / relative).read_text(encoding="utf-8")
+        for relative in ("paypal/signup_lab.py", "tools/roxy_cdp_capture.mjs")
+    ).lower()
+    forbidden = (
+        "getaddrinfo",
+        "nslookup",
+        "netstat",
+        "ss', ['-ltnp",
+        "resolve-dnsname",
+        "api.ipify",
+        "ifconfig.me",
+        "discover ports",
+    )
+    for marker in forbidden:
+        assert marker not in sources
