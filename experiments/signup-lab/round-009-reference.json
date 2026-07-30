@@ -1,0 +1,19 @@
+{
+  "round": 9,
+  "mode": "reference",
+  "status": "ROXY_CREATE_ACCOUNT_CONTROL_MISSING",
+  "ba_hash": "8f12e34a1478b410",
+  "proxy_hash": "2fdfb6860f3e69ed",
+  "country": "US",
+  "last_stage": "pay_login_view",
+  "evidence": [
+    "the initial pay DOM is a login view with a Create an Account submit control",
+    "emailForm is not present until the create-account view is selected",
+    "URL path alone cannot distinguish the two pay views"
+  ],
+  "dead_ends": [
+    "looking for emailForm before switching the pay DOM to create-account view"
+  ],
+  "next_round_focus": "model login-view to create-account-view as an in-page state transition",
+  "capture_path": "captures/signup-lab/round-009-reference"
+}
