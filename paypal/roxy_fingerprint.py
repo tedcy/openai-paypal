@@ -828,8 +828,8 @@ def _redact_proxy_url(proxy_url: object = None) -> str:
     netloc = parsed.hostname
     if parsed.port:
         netloc = f"{netloc}:{parsed.port}"
-    if parsed.username:
-        netloc = f"{urllib.parse.unquote(parsed.username)}:***@{netloc}"
+    if parsed.username is not None or parsed.password is not None:
+        netloc = f"***:***@{netloc}"
     return urllib.parse.urlunsplit((parsed.scheme or "http", netloc, parsed.path, parsed.query, parsed.fragment))
 
 

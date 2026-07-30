@@ -6,6 +6,7 @@ from paypal.session import sanitize_for_log
 from paypal.local_headless import _redact_debug_event, headless_optimized_raw_debug_enabled
 from paypal.traffic_recorder import TrafficRecorder, redact
 from paypal.flow import _cookie_name_summary, _diagnostic_url, _challenge_markers
+from paypal.roxy_fingerprint import _redact_proxy_url
 
 
 def test_risk_diagnostic_helpers_expose_names_only() -> None:
@@ -17,6 +18,14 @@ def test_risk_diagnostic_helpers_expose_names_only() -> None:
     assert "COOKIE-SECRET" not in json.dumps(summary)
     assert _diagnostic_url("https://www.paypal.com/graphql?ba_token=BA-SECRET&ec_token=EC-SECRET") == "https://www.paypal.com/graphql"
     assert _challenge_markers("DataDome authchallenge recaptcha") == ["authchallenge", "recaptcha", "datadome"]
+
+
+def test_proxy_url_redaction_hides_username_and_password() -> None:
+    redacted = _redact_proxy_url("http://proxy-user:proxy-password@proxy.test:3010")
+
+    assert redacted == "http://***:***@proxy.test:3010"
+    assert "proxy-user" not in redacted
+    assert "proxy-password" not in redacted
 
 
 def test_runtime_and_traffic_redaction_cover_sensitive_fields() -> None:
