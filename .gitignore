@@ -7,6 +7,8 @@ cdk_bindings.tmp
 cdk_keys.json
 cdk_keys.txt
 .env
+!.env.example
+.venv/
 cache/
 var/
 debug/

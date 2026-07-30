@@ -1,0 +1,12 @@
+.git
+.gitignore
+.venv
+__pycache__
+*.pyc
+.env
+captures
+cache
+var
+debug
+backups
+*.zip

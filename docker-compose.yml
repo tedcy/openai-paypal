@@ -1,0 +1,17 @@
+services:
+  openai-paypal:
+    build:
+      context: .
+    init: true
+    ports:
+      - "127.0.0.1:${PAYPAL_WEB_PORT:-8080}:8080"
+    environment:
+      PAYPAL_WEB_ALLOW_DEBUG_LOGS: "0"
+      PAYPAL_FINGERPRINT_SOURCE: "headless"
+      PAYPAL_DATADOME_MODE: "headless"
+      PAYPAL_MTR_RUNTIME: "headless"
+      PAYPAL_RISK_SIGNALS_MODE: "headless"
+    volumes:
+      - ./captures:/app/captures
+    shm_size: "1gb"
+    restart: unless-stopped
