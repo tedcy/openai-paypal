@@ -146,3 +146,17 @@ def test_signup_lab_contains_no_network_or_cdp_discovery() -> None:
 )
 def test_roxy_signup_lab_classifies_navigation_stage(url: str, expected: str) -> None:
     assert RoxySignupLab._page_stage(url) == expected
+
+
+def test_passive_challenge_signals_are_observed_but_not_terminal() -> None:
+    lab = object.__new__(RoxySignupLab)
+    page = type("Page", (), {
+        "url": "https://www.paypal.com/pay",
+        "context": type("Context", (), {"cookies": lambda self: [{"name": "tsrce", "value": "authchallengenodeweb"}]})(),
+    })()
+    capture = type("Capture", (), {"challenge_urls": ["https://www.paypal.com/auth/createchallenge/x/hcaptchapassive.js"]})()
+
+    terminal, observed = lab._challenge_evidence(page, capture, "ordinary pay page")
+
+    assert terminal == []
+    assert observed == ["tsrce_authchallenge", "passive_challenge_network"]

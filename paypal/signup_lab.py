@@ -314,23 +314,22 @@ class RoxySignupLab:
         )
         context.stages.append({"time": _utc_now(), "event": "controls_captured", "stage": stage})
 
-    def _challenge_evidence(self, page: Any, capture: CdpCapture, body: str) -> list[str]:
-        evidence = [marker for marker in _CHALLENGE_MARKERS if marker in body.lower()]
+    def _challenge_evidence(self, page: Any, capture: CdpCapture, body: str) -> tuple[list[str], list[str]]:
+        terminal = [marker for marker in _CHALLENGE_MARKERS if marker in body.lower()]
+        observed: list[str] = []
         url_lower = page.url.lower()
         if any(marker in url_lower for marker in ("authchallenge", "/captcha/", "datadome")):
-            evidence.append("challenge_url")
+            terminal.append("challenge_url")
         try:
             cookies = page.context.cookies()
         except Exception:
             cookies = []
         tsrce = next((str(item.get("value") or "").lower() for item in cookies if item.get("name") == "tsrce"), "")
         if "authchallenge" in tsrce:
-            evidence.append("tsrce_authchallenge")
-        # A passive challenge script may complete normally. Treat it as terminal
-        # only when the page/cookie state also says the session is challenged.
-        if evidence and capture.challenge_urls:
-            evidence.append("challenge_network")
-        return list(dict.fromkeys(evidence))
+            observed.append("tsrce_authchallenge")
+        if capture.challenge_urls:
+            observed.append("passive_challenge_network")
+        return list(dict.fromkeys(terminal)), list(dict.fromkeys(observed))
 
     def _fill_contact_phone(self, page: Any) -> bool:
         selectors = (
@@ -369,9 +368,11 @@ class RoxySignupLab:
                 body = page.locator("body").inner_text(timeout=1500)[:10000]
             except Exception:
                 pass
-            markers = self._challenge_evidence(page, capture, body)
+            markers, observed = self._challenge_evidence(page, capture, body)
+            if observed and not context.challenge_markers:
+                context.stages.append({"time": _utc_now(), "event": "passive_challenge_observed", "markers": observed})
             if markers:
-                context.challenge_markers = markers
+                context.challenge_markers = list(dict.fromkeys(observed + markers))
                 raise RuntimeError("ROXY_SIGNUP_CHALLENGED")
             stage = self._page_stage(url)
             if stage not in captured_stages:
