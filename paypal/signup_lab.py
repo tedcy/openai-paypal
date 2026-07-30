@@ -357,6 +357,7 @@ class RoxySignupLab:
         last_observed_challenge: tuple[str, ...] = ()
         pay_action_attempts = 0
         last_pay_action_at = 0.0
+        ctf_login_used = False
         while time.monotonic() < deadline:
             page.wait_for_timeout(350)
             url = page.url
@@ -411,6 +412,25 @@ class RoxySignupLab:
                     continue
                 if last_pay_action_at and time.monotonic() - last_pay_action_at < 10.0:
                     continue
+                if not ctf_login_used:
+                    phone_input = page.locator("#phoneInput")
+                    login_button = page.locator("#loginButton")
+                    try:
+                        if (
+                            phone_input.count()
+                            and phone_input.first.is_visible()
+                            and login_button.count()
+                            and login_button.first.is_visible()
+                        ):
+                            phone_input.first.fill(self.phone)
+                            login_button.first.click(timeout=5000)
+                            ctf_login_used = True
+                            pay_action_attempts += 1
+                            last_pay_action_at = time.monotonic()
+                            context.stages.append({"time": _utc_now(), "event": "ctf_login_continue", "attempt": pay_action_attempts})
+                            continue
+                    except Exception as exc:
+                        context.stages.append({"time": _utc_now(), "event": "ctf_login_control_error", "error_type": type(exc).__name__})
                 if self._click_first(page, (r"create an account", r"create account", r"sign up")):
                     pay_action_attempts += 1
                     last_pay_action_at = time.monotonic()

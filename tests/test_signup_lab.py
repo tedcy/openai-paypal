@@ -169,3 +169,5 @@ def test_pay_action_labels_do_not_include_ambiguous_next_control() -> None:
     assert 'r"create an account"' in pay_block
     assert 'r"next"' not in pay_block
     assert "pay_action_attempts < 3" in pay_block
+    assert 'page.locator("#phoneInput")' in pay_block
+    assert 'page.locator("#loginButton")' in pay_block
