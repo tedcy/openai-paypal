@@ -1,0 +1,19 @@
+{
+  "round": 8,
+  "mode": "reference",
+  "status": "ROXY_SIGNUP_REDIRECT_TIMEOUT",
+  "ba_hash": "8f12e34a1478b410",
+  "proxy_hash": "2fdfb6860f3e69ed",
+  "country": "US",
+  "last_stage": "ctf_profile_continue",
+  "evidence": [
+    "the helper login and profile controls both executed while the URL remained pay",
+    "the captured app script shows createUserAction must return onboardingRedirectUrl before window.location.assign",
+    "profile filling is not a valid pre-signup navigation step"
+  ],
+  "dead_ends": [
+    "using the profile-fill helper before reaching signup"
+  ],
+  "next_round_focus": "after helper login, wait exclusively for the page-owned server action and redirect",
+  "capture_path": "captures/signup-lab/round-008-reference"
+}
