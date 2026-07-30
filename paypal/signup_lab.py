@@ -416,6 +416,10 @@ class RoxySignupLab:
                     last_pay_action_at = time.monotonic()
                     context.stages.append({"time": _utc_now(), "event": "pay_create_account", "attempt": pay_action_attempts})
                     continue
+                pay_action_attempts += 1
+                last_pay_action_at = time.monotonic()
+                self._capture_controls(page, context, f"pay_attempt_{pay_action_attempts}_missing")
+                context.stages.append({"time": _utc_now(), "event": "pay_create_account_missing", "attempt": pay_action_attempts})
             elif stage == "contact" and "contact_continue" not in completed_actions:
                 phone_filled = self._fill_contact_phone(page)
                 context.stages.append({"time": _utc_now(), "event": "contact_phone", "filled": phone_filled})
@@ -574,6 +578,17 @@ class RoxySignupLab:
         except Exception as exc:
             context_result.status = "failed"
             context_result.classification = {**context_result.classification, "error": str(exc)}
+            if browser is not None:
+                try:
+                    active_contexts = browser.contexts
+                    active_page = active_contexts[0].pages[0] if active_contexts and active_contexts[0].pages else None
+                    if active_page is not None:
+                        failure_dir = self.capture_root / "browser"
+                        (failure_dir / "failure.html").write_text(active_page.content(), encoding="utf-8")
+                        active_page.screenshot(path=str(failure_dir / "failure.png"), full_page=True)
+                        context_result.final_url = active_page.url
+                except Exception as capture_exc:
+                    context_result.classification["failure_capture_error"] = str(capture_exc)
             logger.error("Signup lab failed: {}", exc)
         finally:
             if browser is not None:
