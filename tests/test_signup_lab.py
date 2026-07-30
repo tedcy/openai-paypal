@@ -27,6 +27,22 @@ def test_signup_lab_inputs_select_without_network(tmp_path) -> None:
     assert inputs.selection() == ("BA-12345678ABCDEF", "proxy.test:3010:user:password")
 
 
+def test_signup_lab_inputs_accept_utf8_bom(tmp_path) -> None:
+    source = tmp_path / "inputs.json"
+    source.write_text(
+        json.dumps(
+            {
+                "ba_tokens": ["BA-12345678ABCDEF"],
+                "phone": "+17408803459",
+                "proxies": ["proxy.test:3010:user:password"],
+            }
+        ),
+        encoding="utf-8-sig",
+    )
+
+    assert SignupLabInputs.load(source).selection()[0] == "BA-12345678ABCDEF"
+
+
 def test_signup_document_requires_healthy_signup_html() -> None:
     valid = classify_signup_document(
         200,

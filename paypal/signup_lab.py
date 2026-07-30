@@ -110,7 +110,7 @@ class SignupLabInputs:
     @classmethod
     def load(cls, path: str | Path) -> "SignupLabInputs":
         source = Path(path).expanduser().resolve()
-        data = json.loads(source.read_text(encoding="utf-8"))
+        data = json.loads(source.read_text(encoding="utf-8-sig"))
         ba_values = data.get("ba_tokens") or data.get("ba_urls") or []
         tokens = [parse_ba_token(str(item)) for item in ba_values]
         phone = str(data.get("phone") or "").strip()
