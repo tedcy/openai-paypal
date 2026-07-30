@@ -1,0 +1,20 @@
+{
+  "round": 2,
+  "mode": "reference",
+  "status": "ROXY_SIGNUP_CHALLENGED",
+  "ba_hash": "8f12e34a1478b410",
+  "proxy_hash": "2fdfb6860f3e69ed",
+  "country": "US",
+  "last_stage": "pay_continue",
+  "http_status": 0,
+  "evidence": [
+    "pay page rendered account controls",
+    "passive challenge network signal observed after one create-account action",
+    "no main-document challenge or signup request was observed before local termination"
+  ],
+  "dead_ends": [
+    "treating a passive challenge cookie and subresource alone as a terminal page challenge"
+  ],
+  "next_round_focus": "allow passive browser challenge to settle; terminate only on main-document challenge evidence",
+  "capture_path": "captures/signup-lab/round-002d-reference"
+}
