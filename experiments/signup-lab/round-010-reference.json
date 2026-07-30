@@ -1,0 +1,17 @@
+{
+  "round": 10,
+  "mode": "reference",
+  "status": "GENERIC_ERROR_PAGE",
+  "ba_hash": "8f12e34a1478b410",
+  "proxy_hash": "2fdfb6860f3e69ed",
+  "country": "US",
+  "last_stage": "checkoutweb_generic_error",
+  "evidence": [
+    "initial browser navigation landed directly on checkoutweb genericError",
+    "no pay or create-account action was executed",
+    "no explicit invalid or expired BA marker was present"
+  ],
+  "dead_ends": [],
+  "next_round_focus": "repeat once with a fresh profile and unchanged BA/proxy",
+  "capture_path": "captures/signup-lab/round-010-reference"
+}

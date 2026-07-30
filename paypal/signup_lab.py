@@ -367,6 +367,8 @@ class RoxySignupLab:
                 return
             if "/checkoutweb/signup" in url:
                 return
+            if "/checkoutweb/genericError" in url:
+                raise RuntimeError("ROXY_APPROVAL_NAVIGATION_FAILED")
             body = ""
             try:
                 body = page.locator("body").inner_text(timeout=1500)[:10000]
