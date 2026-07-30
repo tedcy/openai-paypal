@@ -488,6 +488,16 @@ class RoxySignupLab:
         try:
             profile_id = client.create_profile(config.workspace_id, config.project_id)
             context_result.profile_id = profile_id
+            _write_json(
+                self.capture_root / "roxy_profile.json",
+                {
+                    "workspace_id": config.workspace_id,
+                    "project_id": config.project_id,
+                    "profile_id": profile_id,
+                    "created_at": _utc_now(),
+                    "cleanup_status": "pending",
+                },
+            )
             client.randomize_profile(config.workspace_id, profile_id)
             cdp_info = client.open_profile(config.workspace_id, profile_id)
             endpoint = _connect_over_cdp(cdp_info)
@@ -563,6 +573,16 @@ class RoxySignupLab:
                     pass
                 try:
                     client.delete_profile(config.workspace_id, profile_id)
+                    _write_json(
+                        self.capture_root / "roxy_profile.json",
+                        {
+                            "workspace_id": config.workspace_id,
+                            "project_id": config.project_id,
+                            "profile_id": profile_id,
+                            "cleanup_status": "deleted",
+                            "cleaned_at": _utc_now(),
+                        },
+                    )
                 except Exception as exc:
                     context_result.profile_retained = True
                     context_result.classification["cleanup_error"] = str(exc)

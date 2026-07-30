@@ -132,6 +132,7 @@ def test_signup_lab_contains_no_network_or_cdp_discovery() -> None:
     )
     for marker in forbidden:
         assert marker not in sources
+    assert "roxy_profile.json" in (root / "paypal/signup_lab.py").read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize(
