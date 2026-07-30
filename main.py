@@ -47,8 +47,35 @@ def main():
         description="PayPal Billing Agreement Approval Automation"
     )
     parser.add_argument(
-        "--ba-token", required=True,
+        "--ba-token", required=False, default="",
         help="Billing Agreement token or agreements/approve URL"
+    )
+    parser.add_argument(
+        "--signup-lab",
+        choices=["reference", "handoff", "cold-protocol"],
+        default=None,
+        help="Stop at checkoutweb/signup for browser/protocol comparison",
+    )
+    parser.add_argument(
+        "--protocol-transport",
+        choices=["httpx", "curl-chrome"],
+        default="httpx",
+        help="HTTP transport used for signup lab protocol requests",
+    )
+    parser.add_argument(
+        "--lab-input-file",
+        default="var/signup-lab/inputs.json",
+        help="Git-ignored JSON containing BA, phone and proxy pools",
+    )
+    parser.add_argument(
+        "--capture-dir",
+        default=None,
+        help="Signup lab raw capture directory",
+    )
+    parser.add_argument(
+        "--keep-roxy-profile",
+        action="store_true",
+        help="Keep the profile created by this signup lab run",
     )
     parser.add_argument(
         "--phone",
@@ -166,13 +193,28 @@ def main():
 
     args = parser.parse_args()
 
+    logger.remove()
+    logger.add(_sanitized_console_sink, level="DEBUG" if args.debug else "INFO")
+
+    if args.signup_lab in {"reference", "handoff"}:
+        from paypal.signup_lab import run_signup_lab_from_file
+
+        result = run_signup_lab_from_file(
+            mode=args.signup_lab,
+            input_file=args.lab_input_file,
+            capture_dir=args.capture_dir,
+            protocol_transport=args.protocol_transport,
+            keep_profile=args.keep_roxy_profile,
+        )
+        print(json.dumps(sanitize_for_log(result), indent=2, ensure_ascii=False))
+        sys.exit(0 if result.get("status") in {"browser_signup_ready", "protocol_signup_ready"} else 1)
+
+    if not args.ba_token:
+        parser.error("--ba-token is required outside signup lab input-file mode")
     try:
         args.ba_token = parse_ba_token(args.ba_token)
     except ValueError as exc:
         parser.error(str(exc))
-
-    logger.remove()
-    logger.add(_sanitized_console_sink, level="DEBUG" if args.debug else "INFO")
     if args.datadome_mode:
         os.environ["PAYPAL_DATADOME_MODE"] = args.datadome_mode
     if args.mtr_runtime:

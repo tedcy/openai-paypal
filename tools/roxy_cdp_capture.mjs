@@ -2,7 +2,6 @@ import fs from 'node:fs/promises';
 import fssync from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { execFileSync } from 'node:child_process';
 import { chromium } from 'file:///home/nonewhite/.npm/_npx/666793a7876f3860/node_modules/js-reverse-mcp/build/src/third_party/index.js';
 
 const args = process.argv.slice(2);
@@ -113,18 +112,12 @@ async function probeEndpoint(endpoint) {
   }
 }
 async function discoverEndpoint() {
-  if (explicitEndpoint) {
-    const probed = await probeEndpoint(explicitEndpoint);
-    if (!probed) throw new Error(`无法连接 CDP endpoint: ${explicitEndpoint}`);
-    return probed;
+  if (!explicitEndpoint) {
+    throw new Error('必须通过 --endpoint 显式传入 Roxy /browser/open 返回的 CDP endpoint');
   }
-  const out = execFileSync('ss', ['-ltnp'], { encoding: 'utf8' });
-  const ports = Array.from(new Set([...out.matchAll(/127\.0\.0\.1:(\d+)/g)].map(m => Number(m[1])))).sort((a, b) => b - a);
-  for (const p of ports) {
-    const probed = await probeEndpoint(`http://127.0.0.1:${p}`);
-    if (probed) return probed;
-  }
-  throw new Error('没有发现可用的 Roxy Chrome CDP endpoint');
+  const probed = await probeEndpoint(explicitEndpoint);
+  if (!probed) throw new Error(`无法连接 CDP endpoint: ${explicitEndpoint}`);
+  return probed;
 }
 
 const endpointInfo = await discoverEndpoint();
