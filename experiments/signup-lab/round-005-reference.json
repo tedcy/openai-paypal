@@ -1,0 +1,19 @@
+{
+  "round": 5,
+  "mode": "reference",
+  "status": "ROXY_SIGNUP_REDIRECT_TIMEOUT",
+  "ba_hash": "8f12e34a1478b410",
+  "proxy_hash": "2fdfb6860f3e69ed",
+  "country": "US",
+  "last_stage": "pay_create_account_attempt_1",
+  "evidence": [
+    "the first exact create-account click succeeded but produced no navigation",
+    "later exact-control lookups did not produce another click",
+    "the page remained on pay without an explicit challenge page"
+  ],
+  "dead_ends": [
+    "retrying a static create-account label without capturing the post-challenge control state"
+  ],
+  "next_round_focus": "capture final DOM, screenshot, and dynamic controls before changing selectors",
+  "capture_path": "captures/signup-lab/round-005-reference"
+}
