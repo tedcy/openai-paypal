@@ -1,0 +1,19 @@
+{
+  "round": 11,
+  "mode": "reference",
+  "status": "ROXY_APPROVAL_NAVIGATION_FAILED",
+  "ba_hash": "8f12e34a1478b410",
+  "proxy_hash": "2fdfb6860f3e69ed",
+  "country": "US",
+  "last_stage": "checkoutweb_generic_error",
+  "evidence": [
+    "a fresh profile reproduced the same immediate checkoutweb genericError",
+    "no page action was executed",
+    "no explicit invalid or expired BA marker was present"
+  ],
+  "dead_ends": [
+    "repeating the first BA with the same proxy after two identical genericError signatures"
+  ],
+  "next_round_focus": "blocked by BA rotation rule: genericError is not an explicit invalid or expired BA response",
+  "capture_path": "captures/signup-lab/round-011-reference"
+}

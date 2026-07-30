@@ -440,6 +440,15 @@ class RoxySignupLab:
                     continue
         raise RuntimeError("ROXY_SIGNUP_REDIRECT_TIMEOUT")
 
+    def _capture_failure_page(self, page: Any, context: BrowserSignupContext) -> None:
+        try:
+            failure_dir = self.capture_root / "browser"
+            (failure_dir / "failure.html").write_text(page.content(), encoding="utf-8")
+            page.screenshot(path=str(failure_dir / "failure.png"), full_page=True)
+            context.final_url = page.url
+        except Exception as exc:
+            context.classification["failure_capture_error"] = str(exc)
+
     @staticmethod
     def _extract_context(url: str, html: str) -> tuple[str, str, str]:
         material = f"{url}\n{html}"
@@ -549,7 +558,11 @@ class RoxySignupLab:
                 approval_url = f"https://www.paypal.com/agreements/approve?ba_token={self.ba_token}"
                 context_result.stages.append({"time": _utc_now(), "event": "approval_start"})
                 page.goto(approval_url, wait_until="domcontentloaded", timeout=45000)
-                self._drive_to_signup(page, capture, context_result)
+                try:
+                    self._drive_to_signup(page, capture, context_result)
+                except Exception:
+                    self._capture_failure_page(page, context_result)
+                    raise
                 cookies = browser_context.cookies()
                 context_result.cookies = cookies
                 if self.mode == "handoff":
@@ -589,17 +602,6 @@ class RoxySignupLab:
         except Exception as exc:
             context_result.status = "failed"
             context_result.classification = {**context_result.classification, "error": str(exc)}
-            if browser is not None:
-                try:
-                    active_contexts = browser.contexts
-                    active_page = active_contexts[0].pages[0] if active_contexts and active_contexts[0].pages else None
-                    if active_page is not None:
-                        failure_dir = self.capture_root / "browser"
-                        (failure_dir / "failure.html").write_text(active_page.content(), encoding="utf-8")
-                        active_page.screenshot(path=str(failure_dir / "failure.png"), full_page=True)
-                        context_result.final_url = active_page.url
-                except Exception as capture_exc:
-                    context_result.classification["failure_capture_error"] = str(capture_exc)
             logger.error("Signup lab failed: {}", exc)
         finally:
             if browser is not None:
