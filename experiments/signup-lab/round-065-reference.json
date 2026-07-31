@@ -1,0 +1,25 @@
+{
+  "round": 65,
+  "mode": "reference",
+  "control": "first randomized iOS reference after unifying the Profile lifecycle",
+  "ba_hash": "15e96bc757b6d93f",
+  "proxy_hash": "4755d05985821898",
+  "profile_hash": "ed1885d6c364215f",
+  "profile_source": "created_randomized_ios",
+  "result": "PRE_NAVIGATION_CDP_STARTUP_PAGE_RACE",
+  "target_requests": 0,
+  "http_status": 0,
+  "ui_generation": "unknown",
+  "profile_freeze_verified": true,
+  "runtime_verified": false,
+  "capture_integrity": "not_started",
+  "profile_cleanup": "retained_pending_exact_cleanup",
+  "network_environment_inspected": false,
+  "evidence": [
+    "the Profile used randomized iOS 18 / Chrome 136 / WebRTC replacement and the freeze verification passed",
+    "the Roxy startup Page closed before BrowserContext.new_cdp_session attached, producing Target.attachToTarget No target with given id",
+    "CDP capture and target navigation never started, so the BA received no response and genericError failover does not apply",
+    "the approval-control path already avoids this race by creating a dedicated Page before closing Roxy startup Pages"
+  ],
+  "conclusion": "Reuse the proven dedicated-Page helper in reference/handoff, clean only the exact Round 65 Profile, and retry with a new SID while keeping BA candidate one selected."
+}
