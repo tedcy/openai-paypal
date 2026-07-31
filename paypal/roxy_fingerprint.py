@@ -630,6 +630,11 @@ def inspect_roxy_runtime_identity(cdp: Any, page: Any, config: RoxyCaptureConfig
         mismatches.append("browser_product")
     if _normalized_major(user_agent) != config.core_version:
         mismatches.append("user_agent")
+    user_agent_lower = user_agent.lower()
+    if config.os_name.lower() == "macos" and not (
+        "macintosh" in user_agent_lower and "mac os x" in user_agent_lower
+    ):
+        mismatches.append("user_agent_os")
     if "mac" not in platform.lower():
         mismatches.append("platform")
     if observed["language"] != config.language:

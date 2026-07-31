@@ -381,6 +381,41 @@ def test_runtime_identity_accepts_outer_height_clamped_to_physical_screen() -> N
     assert verification["normalizations"] == ["outer_height_clamped_to_screen"]
 
 
+def test_runtime_identity_rejects_windows_ua_for_macos_policy() -> None:
+    config = RoxyCaptureConfig(
+        api_base="http://127.0.0.1:50000",
+        api_key="",
+        language="en-US",
+        display_language="en-US",
+        timezone="GMT+01:00 Europe/Sarajevo",
+    )
+
+    class Cdp:
+        def send(self, method):
+            return {"product": "Chrome/136.0.7103.49", "protocolVersion": "1.3"}
+
+    class Page:
+        def evaluate(self, script):
+            return {
+                "userAgent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/136.0.0.0 Safari/537.36"
+                ),
+                "platform": "MacIntel",
+                "language": "en-US",
+                "languages": ["en-US"],
+                "timezone": "Europe/Sarajevo",
+                "screen": {"width": 1536, "height": 864},
+                "window": {"outerWidth": 1000, "outerHeight": 864},
+            }
+
+    verification = inspect_roxy_runtime_identity(Cdp(), Page(), config)
+
+    assert verification["verified"] is False
+    assert verification["mismatches"] == ["user_agent_os"]
+
+
 def test_runtime_identity_rejects_unexplained_outer_height_mismatch() -> None:
     config = RoxyCaptureConfig(
         api_base="http://127.0.0.1:50000",
