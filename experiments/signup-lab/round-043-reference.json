@@ -1,0 +1,21 @@
+{
+  "round": 43,
+  "mode": "reference",
+  "control": "clean existing test profile, new BA, new HTTP SID, address-bar navigation",
+  "ba_hash": "454fb0ad09889a8a",
+  "proxy_hash": "6180efde8de82374",
+  "result": "approval_terminal_challenge",
+  "approval_status": 403,
+  "protocol": "http/1.1",
+  "request_events": 10,
+  "response_events": 9,
+  "capture_integrity": "49_of_49_jsonl_records_valid",
+  "profile_cleanup": "closed_not_deleted",
+  "evidence": [
+    "cookies, HTTP cache, PayPal origin storage, and service workers were cleared before navigation",
+    "the approval navigation was initiated from the visible address bar after CDP capture was attached",
+    "the approval main document returned HTTP 403 and redirected to a terminal challenge document",
+    "the run did not interact with the challenge or submit any signup data"
+  ],
+  "conclusion": "A fresh BA plus one changed HTTP SID was insufficient while the existing device-name and MAC identity remained unchanged. This is a single SID result and does not establish that the BA itself is invalid."
+}
