@@ -1,0 +1,22 @@
+{
+  "round": 16,
+  "mode": "reference",
+  "status": "ROXY_CREATE_ACCOUNT_CONTROL_MISSING",
+  "ba_hash": "20b1939e7a12c001",
+  "proxy_hash": "1ca1868089ae2dba",
+  "country": "BA",
+  "ui_generation": "unknown",
+  "last_stage": "pay_create_account_view",
+  "evidence": [
+    "CDP observed 36 target HTTPS responses over http/1.1 and zero h2 responses",
+    "the pay page exposed the same new login/create-account application controls as the prior contact-signup sample",
+    "the page country component remained defaultValue US and login_phone_country_code remained +1",
+    "Create an Account was selected but the application-owned email form did not appear within the strict timeout",
+    "no phone number, SMS, registration, funding, or authorization action occurred"
+  ],
+  "dead_ends": [
+    "assuming a BA proxy and BA task profile alone changes the pay-page country from its US default"
+  ],
+  "next_round_focus": "select Bosnia and Herzegovina in the existing pay-page country control before entering the create-account view",
+  "capture_path": "captures/signup-lab/round-016-ba-http1-reference"
+}
