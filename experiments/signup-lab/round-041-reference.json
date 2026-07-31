@@ -1,0 +1,82 @@
+{
+  "round": 41,
+  "mode": "clean_existing_profile_reference",
+  "country": "BA",
+  "status": "approval_challenged_after_verified_clean_test_profile",
+  "reported_failure": "ROXY_SIGNUP_CHALLENGED",
+  "response_class": "APPROVAL_403_INTERSTITIAL_CAPTCHA",
+  "ba_hash": "7822effedee5dbc3",
+  "profile_hash": "ee3917e3ec1305dc",
+  "profile_name_verified": true,
+  "profile_settings_preserved": true,
+  "profile_state_reset": {
+    "page_before_target": "about:blank",
+    "cookies_before_count": 10,
+    "cookies_after_count": 0,
+    "http_cache_cleared": true,
+    "browser_cookies_cleared": true,
+    "storage_origins_cleared": 4,
+    "verified": true
+  },
+  "runtime": {
+    "browser": "Chrome/136.0.7103.49",
+    "platform": "MacIntel",
+    "language": "bs-BA",
+    "timezone": "Europe/Sarajevo",
+    "hardware_concurrency": 12,
+    "device_memory": 0,
+    "geolocation_permission": "denied",
+    "outer_size": "1000x1000",
+    "dnt": "unobservable"
+  },
+  "approval_request": {
+    "status": 403,
+    "protocol": "http/1.1",
+    "cookie_names": [],
+    "accept_language": "bs-BA,bs;q=0.9",
+    "dnt_header_present": false,
+    "client_hints_platform": "macOS",
+    "header_shape_matches_round_40": true
+  },
+  "browser_transport": {
+    "launch_overrides": [],
+    "https_http11_responses": 13,
+    "https_h2_responses": 0,
+    "request_events": 25,
+    "response_events": 21,
+    "main_documents": [
+      "/agreements/approve:403:http/1.1",
+      "/interstitial/:200:http/1.1",
+      "/captcha/:200:http/1.1"
+    ]
+  },
+  "capture_integrity": {
+    "valid": true,
+    "records": 101,
+    "invalid_lines": 0
+  },
+  "automatic_round_39_40_diff": {
+    "same": [
+      "macOS Chrome 136 UA",
+      "MacIntel platform",
+      "bs-BA language",
+      "Europe/Sarajevo timezone",
+      "12 hardware threads",
+      "HTTP/1.1 approval transport",
+      "approval navigation and client-hint header shape"
+    ],
+    "different": [
+      "test does not expose deviceMemory while automatic reports 8 GB",
+      "test denies geolocation while automatic grants it",
+      "test outer window is exactly 1000x1000 while automatic reports 1002x1002"
+    ]
+  },
+  "profile_cleanup": "exact_test_profile_closed_and_never_deleted",
+  "evidence": {
+    "capture_path": "captures/signup-lab/round-041-clean-test-profile-reference"
+  },
+  "conclusion": "The clean test Profile reproduced the same approval 403 after a verified zero-cookie and cleared-cache reset. Therefore the persisted test fingerprint alone is not sufficient to reproduce the earlier manual 200. The remaining observed runtime differences are concrete parity targets, but none is yet proven causal.",
+  "next_round_focus": "Capture one manual navigation on the same clean test Profile with CDP attached before navigation, then distinguish navigation/interaction state from Profile fingerprint before changing the automatic policy.",
+  "network_preflight_used": false,
+  "signup_request_captured": false
+}
