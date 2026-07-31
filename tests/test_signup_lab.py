@@ -362,6 +362,7 @@ def test_signup_lab_new_profiles_use_randomized_ios_lifecycle() -> None:
     assert "refresh_host_identity=True" in source
     assert "open_existing_profile_preserving_settings" in source
     assert "preserve_randomized=not existing_control" in source
+    assert "_create_dedicated_control_page" in source
 
 
 def test_signup_document_requires_healthy_signup_html() -> None:

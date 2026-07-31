@@ -382,6 +382,7 @@ class BrowserSignupContext:
     browser_create_args: list[str] = field(default_factory=list)
     browser_open_args: list[str] = field(default_factory=list)
     browser_open_mode: str = ""
+    page_lifecycle: dict[str, Any] = field(default_factory=dict)
     http2_disabled_requested: bool = False
     transport_summary: dict[str, Any] = field(default_factory=dict)
     capture_integrity: dict[str, Any] = field(default_factory=dict)
@@ -1167,11 +1168,9 @@ class RoxySignupLab:
                 if len(contexts) != 1:
                     raise RuntimeError(f"expected one Roxy context, got {len(contexts)}")
                 browser_context = contexts[0]
-                pages = browser_context.pages
-                page = pages[0] if pages else browser_context.new_page()
-                for stale in list(browser_context.pages):
-                    if stale is not page:
-                        stale.close()
+                page, context_result.page_lifecycle = _create_dedicated_control_page(
+                    browser_context
+                )
                 cdp = browser_context.new_cdp_session(page)
                 if existing_control:
                     clear_existing_profile_state(
@@ -1342,6 +1341,7 @@ class RoxySignupLab:
                 "create_args": context_result.browser_create_args,
                 "open_args": context_result.browser_open_args,
                 "open_mode": context_result.browser_open_mode,
+                "page_lifecycle": context_result.page_lifecycle,
                 "http2_disabled_requested": context_result.http2_disabled_requested,
                 **context_result.transport_summary,
             },
