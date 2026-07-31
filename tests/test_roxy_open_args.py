@@ -1,9 +1,13 @@
 from types import SimpleNamespace
 
+import pytest
+
+import paypal.roxy_fingerprint as roxy_fingerprint_module
 from paypal.roxy_fingerprint import (
     ROXY_FINGERPRINT_POLICY,
     RoxyApiClient,
     RoxyCaptureConfig,
+    RoxyFingerprintError,
     _roxy_open_args,
     _roxy_profile_startup_args,
     inspect_roxy_runtime_identity,
@@ -859,3 +863,68 @@ def test_randomized_freeze_merges_partial_random_env_over_detail_noise() -> None
     }
     assert modified["fingerInfo"]["webGLRender"] == "fresh-renderer"
     assert modified["fingerInfo"]["hardwareConcurrent"] == "6"
+
+
+def test_roxy_local_api_retries_only_explicit_rate_limit(monkeypatch) -> None:
+    class Response:
+        status_code = 200
+
+        def __init__(self, payload):
+            self.payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self.payload
+
+    class HttpClient:
+        def __init__(self):
+            self.responses = [
+                Response({"code": 1, "msg": "请求过频，请稍后再试"}),
+                Response({"code": 0, "data": {"rows": []}}),
+            ]
+            self.calls = 0
+
+        def request(self, method, path, **kwargs):
+            self.calls += 1
+            return self.responses.pop(0)
+
+    client = RoxyApiClient.__new__(RoxyApiClient)
+    client.client = HttpClient()
+    sleeps = []
+    monkeypatch.setattr(roxy_fingerprint_module, "_ROXY_API_MIN_INTERVAL_SECONDS", 0.0)
+    monkeypatch.setattr(roxy_fingerprint_module, "_ROXY_API_RATE_LIMIT_DELAYS", (0.0,))
+    monkeypatch.setattr(roxy_fingerprint_module.time, "sleep", sleeps.append)
+    monkeypatch.setattr(roxy_fingerprint_module, "_ROXY_API_LAST_COMPLETED_AT", 0.0)
+
+    result = client.request("GET", "/browser/detail", params={"dirId": "owned"})
+
+    assert result == {"code": 0, "data": {"rows": []}}
+    assert client.client.calls == 2
+    assert sleeps == [0.0]
+
+
+def test_roxy_profile_create_is_not_retried_after_rate_limit(monkeypatch) -> None:
+    class Response:
+        status_code = 429
+
+        def raise_for_status(self):
+            raise AssertionError("429 must be classified before raise_for_status")
+
+    class HttpClient:
+        calls = 0
+
+        def request(self, method, path, **kwargs):
+            self.calls += 1
+            return Response()
+
+    client = RoxyApiClient.__new__(RoxyApiClient)
+    client.client = HttpClient()
+    monkeypatch.setattr(roxy_fingerprint_module, "_ROXY_API_MIN_INTERVAL_SECONDS", 0.0)
+    monkeypatch.setattr(roxy_fingerprint_module, "_ROXY_API_LAST_COMPLETED_AT", 0.0)
+
+    with pytest.raises(RoxyFingerprintError, match="ROXY_API_RATE_LIMIT_EXHAUSTED"):
+        client.request("POST", "/browser/create", json={})
+
+    assert client.client.calls == 1

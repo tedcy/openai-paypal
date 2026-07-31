@@ -7,6 +7,7 @@ import json
 import os
 import random
 import re
+import threading
 import time
 import urllib.parse
 import uuid
@@ -32,6 +33,49 @@ from config import (
 
 class RoxyFingerprintError(RuntimeError):
     """Raised when RoxyBrowser cannot provide a runtime fingerprint."""
+
+
+class _RoxyApiRateLimitError(RoxyFingerprintError):
+    """Internal marker for an explicit Roxy Local API frequency response."""
+
+
+_ROXY_API_REQUEST_LOCK = threading.RLock()
+_ROXY_API_LAST_COMPLETED_AT = 0.0
+_ROXY_API_MIN_INTERVAL_SECONDS = 1.0
+_ROXY_API_RATE_LIMIT_DELAYS = (2.0, 4.0, 8.0)
+
+
+def _is_roxy_rate_limit_message(value: object) -> bool:
+    text = str(value or "").strip().lower()
+    return any(
+        marker in text
+        for marker in (
+            "请求过频",
+            "请求频繁",
+            "too many requests",
+            "rate limit",
+            "rate-limit",
+        )
+    )
+
+
+def _safe_roxy_api_endpoint(path: object) -> str:
+    parsed = urllib.parse.urlsplit(str(path or ""))
+    parts = [part for part in parsed.path.lower().split("/") if part]
+    allowed = {
+        "clear_local_cache",
+        "close",
+        "create",
+        "delete",
+        "detail",
+        "mdf",
+        "open",
+        "random_env",
+        "workspace",
+    }
+    if len(parts) >= 2 and parts[0] == "browser" and parts[1] in allowed:
+        return f"/browser/{parts[1]}"
+    return "/roxy-api"
 
 
 def _load_dotenv_value(name: str) -> str:
@@ -1036,17 +1080,64 @@ class RoxyApiClient:
         self.client.close()
 
     def request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
-        response = self.client.request(method, path, **kwargs)
-        response.raise_for_status()
-        try:
-            payload = response.json()
-        except Exception as exc:
-            raise RoxyFingerprintError(f"Roxy API {path} 返回非 JSON 响应") from exc
-        code = payload.get("code")
-        if code not in (0, "0", None):
-            msg = payload.get("msg") or payload.get("message") or payload
-            raise RoxyFingerprintError(f"Roxy API {path} failed: {msg}")
-        return payload
+        global _ROXY_API_LAST_COMPLETED_AT
+
+        endpoint = _safe_roxy_api_endpoint(path)
+        is_create = endpoint == "/browser/create"
+        retry_delays = () if is_create else _ROXY_API_RATE_LIMIT_DELAYS
+        rate_limit_failures = 0
+        while True:
+            try:
+                with _ROXY_API_REQUEST_LOCK:
+                    wait_seconds = max(
+                        0.0,
+                        _ROXY_API_LAST_COMPLETED_AT
+                        + _ROXY_API_MIN_INTERVAL_SECONDS
+                        - time.monotonic(),
+                    )
+                    if wait_seconds:
+                        time.sleep(wait_seconds)
+                    try:
+                        response = self.client.request(method, path, **kwargs)
+                        if int(getattr(response, "status_code", 0) or 0) == 429:
+                            raise _RoxyApiRateLimitError(
+                                f"ROXY_API_RATE_LIMITED endpoint={endpoint}"
+                            )
+                        response.raise_for_status()
+                        try:
+                            payload = response.json()
+                        except Exception as exc:
+                            raise RoxyFingerprintError(
+                                f"Roxy API {endpoint} 返回非 JSON 响应"
+                            ) from exc
+                        code = payload.get("code")
+                        if code not in (0, "0", None):
+                            msg = payload.get("msg") or payload.get("message") or payload
+                            if _is_roxy_rate_limit_message(msg):
+                                raise _RoxyApiRateLimitError(
+                                    f"ROXY_API_RATE_LIMITED endpoint={endpoint}"
+                                )
+                            raise RoxyFingerprintError(
+                                f"Roxy API {endpoint} failed: {msg}"
+                            )
+                        return payload
+                    finally:
+                        _ROXY_API_LAST_COMPLETED_AT = time.monotonic()
+            except _RoxyApiRateLimitError as exc:
+                if rate_limit_failures >= len(retry_delays):
+                    raise RoxyFingerprintError(
+                        f"ROXY_API_RATE_LIMIT_EXHAUSTED endpoint={endpoint}"
+                    ) from exc
+                delay = retry_delays[rate_limit_failures]
+                rate_limit_failures += 1
+                logger.warning(
+                    "Roxy Local API rate limited endpoint={} retry={}/{} delay_seconds={}",
+                    endpoint,
+                    rate_limit_failures,
+                    len(retry_delays),
+                    delay,
+                )
+                time.sleep(delay)
 
     def _set_api_key(self, api_key: str) -> None:
         api_key = (api_key or "").strip()
