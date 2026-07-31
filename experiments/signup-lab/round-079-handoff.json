@@ -1,0 +1,28 @@
+{
+  "round": 79,
+  "mode": "handoff",
+  "control": "Round 78 CookieJar success plus requested generated iOS/CriOS 136 headers on a fresh Profile and SID",
+  "ba_hash": "86d9fa61df4d6bcb",
+  "proxy_hash": "2ec303173040595d",
+  "profile_hash": "f2804f3cf518a013",
+  "result": "APPROVAL_403_BEFORE_HEADER_EXPERIMENT_SAMPLE_1",
+  "approval_document_status": 403,
+  "http_protocol": "http/1.1",
+  "requested_protocol_cookie_source": "browser-jar",
+  "requested_protocol_header_source": "generated-ios136",
+  "request_events": 91,
+  "response_events": 86,
+  "signup_request_paused_count": 0,
+  "protocol_request_sent": false,
+  "capture_integrity": "valid_441_of_441",
+  "profile_cleanup": "retained_pending_exact_cleanup",
+  "network_environment_inspected": false,
+  "evidence": [
+    "the committed approval document returned HTTP 403 over HTTP/1.1 and entered interstitial/challenge documents",
+    "the flow stopped before checkoutweb/signup, so neither CookieJar nor generated handoff headers were exercised",
+    "profile and runtime verification succeeded and all 441 capture records parsed contiguously",
+    "the safe checkpoint reported the default header source because requested handoff sources were assigned only after a signup pause",
+    "no Python signup request or out-of-scope action occurred"
+  ],
+  "conclusion": "This is a pre-handoff SID challenge, not a header-builder result. Quarantine only this SID, fix the diagnostic source fields at context creation, and repeat the unchanged header experiment with a fresh Profile and SID."
+}
