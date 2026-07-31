@@ -343,6 +343,7 @@ def test_signup_navigation_uses_locale_independent_create_account_control() -> N
 
     assert 'form[data-testid="create-account-form"]' in source
     assert 'button[type="submit"]' in source
+    assert "no_wait_after=True" in source
     assert "english-text-fallback" in source
 
 

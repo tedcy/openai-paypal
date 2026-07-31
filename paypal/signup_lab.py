@@ -872,7 +872,10 @@ class RoxySignupLab:
                             create_account_button.count()
                             and create_account_button.first.is_visible()
                         ):
-                            create_account_button.first.click(timeout=5000)
+                            create_account_button.first.click(
+                                timeout=5000,
+                                no_wait_after=True,
+                            )
                             selected_by = "create-account-form"
                     except Exception as exc:
                         context.stages.append(
