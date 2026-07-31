@@ -1,0 +1,55 @@
+{
+  "round": 25,
+  "mode": "reference",
+  "country": "BA",
+  "status": "failed_at_approval_challenge",
+  "reported_failure": "ROXY_SIGNUP_REDIRECT_TIMEOUT",
+  "response_class": "APPROVAL_403_DATADOME_CAPTCHA",
+  "ba_hash": "20b1939e7a12c001",
+  "proxy_hash": "1ca1868089ae2dba",
+  "fingerprint_policy": "legacy-macos15-chrome136",
+  "profile_freeze_verified": true,
+  "runtime_identity_verified": true,
+  "runtime_normalizations": [
+    "outer_height_clamped_to_screen"
+  ],
+  "browser_transport": {
+    "http2_disabled": true,
+    "https_http11_responses": 11,
+    "https_h2_responses": 0,
+    "request_events": 25,
+    "response_events": 19,
+    "main_documents": [
+      "/agreements/approve:403:http/1.1",
+      "/interstitial/:200:http/1.1",
+      "/captcha/:200:http/1.1"
+    ]
+  },
+  "capture_integrity": {
+    "valid": true,
+    "records": 98,
+    "invalid_lines": 0
+  },
+  "offline_control_diff": {
+    "control": "round-014-ba-http1-reference",
+    "same_ba_hash": true,
+    "same_proxy_hash": true,
+    "same_method_query_and_header_set": true,
+    "control_approval_status": 200,
+    "round_25_approval_status": 403,
+    "identity_change": "windows-chrome150-to-macos-chrome136"
+  },
+  "profile_cleanup": "exact_profile_deleted_after_capture",
+  "evidence": {
+    "capture_path": "captures/signup-lab/round-025-macos-reference",
+    "challenge_markers": [
+      "datadome",
+      "interstitial",
+      "captcha"
+    ]
+  },
+  "conclusion": "The macOS Chrome 136 runtime and HTTP/1.1 transport were effective, but the first approval document was challenged. Roxy v4 omits generated fingerInfo from detail, while the current mdf fallback starts from an empty object and can discard the create-time Canvas, AudioContext, WebGL, hardware, and device randomization directives.",
+  "next_round_focus": "When detail omits fingerInfo, merge mdf from the complete create-time fingerprint template before reapplying fixed fields, matching the reference project's v4 fallback behavior.",
+  "network_preflight_used": false,
+  "signup_request_captured": false
+}
