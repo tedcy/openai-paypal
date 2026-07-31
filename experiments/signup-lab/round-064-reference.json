@@ -1,0 +1,29 @@
+{
+  "round": 64,
+  "mode": "reference",
+  "control": "first target-bearing reference run after the retained test Profile gate",
+  "ba_hash": "15e96bc757b6d93f",
+  "proxy_hash": "f193671abf99f7d3",
+  "profile_hash": "bcaf18f1394589c7",
+  "profile_source": "created",
+  "profile_policy": "fixed macOS 15 Chrome 136",
+  "result": "APPROVAL_403_REFERENCE_PROFILE_POLICY_CONFOUND",
+  "http_status": 403,
+  "final_path": "/agreements/approve",
+  "transport": "http/1.1",
+  "capture_integrity": "valid_47_of_47",
+  "main_documents": [
+    {"path": "/agreements/approve", "status": 403},
+    {"path": "/captcha/", "status": 200}
+  ],
+  "profile_cleanup": "closed_retained",
+  "network_environment_inspected": false,
+  "evidence": [
+    "reference unexpectedly created a fixed macOS 15 Profile instead of the randomized iOS 18 policy that passed Rounds 59-62",
+    "the approval document returned HTTP 403 over HTTP/1.1 and then loaded a CAPTCHA document",
+    "all 47 capture records verified and the headed window remained live for the configured five-second evidence hold",
+    "the response is confounded by the Profile-policy change and is not a genericError BA failover condition",
+    "no challenge was solved and no Create Account, signup, phone, OTP, registration, funding, or authorization action occurred"
+  ],
+  "conclusion": "Unify newly created reference/handoff Profiles with the proven randomized iOS 18 / Chrome 136 / WebRTC replacement lifecycle before the next target run. Keep BA candidate one selected and rotate to a new SID."
+}
