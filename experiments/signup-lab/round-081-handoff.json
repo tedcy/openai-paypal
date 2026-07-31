@@ -1,0 +1,28 @@
+{
+  "round": 81,
+  "mode": "handoff",
+  "control": "unchanged CookieJar plus generated iOS/CriOS 136 header experiment on the third fresh Profile and SID",
+  "ba_hash": "86d9fa61df4d6bcb",
+  "proxy_hash": "6abae49ef08fd316",
+  "profile_hash": "f3258d229c8c7e43",
+  "result": "GENERIC_ERROR_BEFORE_HEADER_EXPERIMENT_SWITCH_BA",
+  "main_document_status": 200,
+  "main_document_path": "/checkoutweb/genericError",
+  "http_protocol": "http/1.1",
+  "requested_protocol_cookie_source": "browser-jar",
+  "requested_protocol_header_source": "generated-ios136",
+  "request_events": 4,
+  "response_events": 2,
+  "signup_request_paused_count": 0,
+  "protocol_request_sent": false,
+  "capture_integrity": "valid_17_of_17",
+  "profile_cleanup": "retained_pending_exact_cleanup",
+  "network_environment_inspected": false,
+  "evidence": [
+    "the browser navigated to checkoutweb/genericError before Pay or signup",
+    "the requested CookieJar and generated header sources were recorded but never exercised",
+    "profile and runtime verification succeeded and all 17 capture records parsed contiguously",
+    "no Python signup request or out-of-scope action occurred"
+  ],
+  "conclusion": "Apply the operator-defined genericError failover rule: retire the current BA from this experiment, select the next queued BA, and repeat the unchanged CookieJar plus generated-header handoff with a fresh Profile and SID."
+}
