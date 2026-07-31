@@ -1,0 +1,24 @@
+{
+  "round": 48,
+  "mode": "reference",
+  "control": "strict no-CDP explicit address-bar navigation with a fresh full identity",
+  "ba_hash": "454fb0ad09889a8a",
+  "proxy_hash": "f5c85d52f2d2a86f",
+  "device_name_hash": "cd5e75c891a31efb",
+  "mac_hash": "bd9eb0f9bcda7a3e",
+  "cache_clear": "roxy_native_all",
+  "cdp_connected": false,
+  "open_payload_overrides": "none",
+  "navigation_source": "visible_address_bar",
+  "result": "approval_terminal_challenge",
+  "status": "not_observed_without_cdp",
+  "profile_cleanup": "left_open_not_deleted",
+  "evidence": [
+    "Roxy closed the exact test Profile, cleared local cache type=all, accepted a new SID, device name, and MAC, then opened without CDP",
+    "the BA URL was entered explicitly through the visible address bar",
+    "the document remained loading at the initial observation and was allowed additional time before classification",
+    "the final visible document was a terminal blocked security-challenge page",
+    "no CAPTCHA or page control was used"
+  ],
+  "conclusion": "This fresh SID and identity did not reproduce the prior success. Rotate to another fresh SID and identity rather than treating a single challenged session as a BA failure."
+}
