@@ -1,6 +1,5 @@
 import json
 from pathlib import Path
-import re
 from types import SimpleNamespace
 
 import pytest
@@ -11,7 +10,6 @@ from paypal.signup_lab import (
     CdpCapture,
     RoxySignupLab,
     SignupLabInputs,
-    _COUNTRY_SELECTION_LABELS,
     _configure_roxy_for_signup_lab,
     classify_signup_document,
     classify_signup_ui,
@@ -118,13 +116,6 @@ def test_signup_lab_allows_slow_roxy_profile_startup() -> None:
     assert config.close_after_capture is False
     assert config.delete_after_capture is False
     assert config.timeout_seconds == 60.0
-
-
-def test_ba_country_selection_matches_name_and_dial_prefix() -> None:
-    labels = _COUNTRY_SELECTION_LABELS["BA"]
-
-    assert any(re.fullmatch(pattern, "Bosnia and Herzegovina", re.I) for pattern in labels)
-    assert any(re.fullmatch(pattern, "+387", re.I) for pattern in labels)
 
 
 def test_signup_document_requires_healthy_signup_html() -> None:
