@@ -381,6 +381,44 @@ def test_runtime_identity_verification_uses_cdp_without_webrtc_probe() -> None:
     assert verification["observed"]["headless_ua"] is False
 
 
+def test_runtime_identity_treats_internal_page_dnt_as_unobservable() -> None:
+    config = RoxyCaptureConfig(
+        api_base="http://127.0.0.1:50000",
+        api_key="",
+        language="en-US",
+        display_language="en-US",
+        timezone="GMT+01:00 Europe/Sarajevo",
+    )
+
+    class Cdp:
+        def send(self, method):
+            return {"product": "Chrome/136.0.7103.49", "protocolVersion": "1.3"}
+
+    class Page:
+        def evaluate(self, script):
+            return {
+                **_aligned_runtime_fields(),
+                "doNotTrack": "",
+                "userAgent": (
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/136.0.0.0 Safari/537.36"
+                ),
+                "platform": "MacIntel",
+                "language": "bs-BA",
+                "languages": ["bs-BA"],
+                "timezone": "Europe/Sarajevo",
+                "screen": {"width": 2048, "height": 1152},
+                "window": {"outerWidth": 1000, "outerHeight": 1000},
+            }
+
+    verification = inspect_roxy_runtime_identity(Cdp(), Page(), config)
+
+    assert verification["verified"] is True
+    assert verification["mismatches"] == []
+    assert verification["unobservable"] == ["do_not_track"]
+
+
 def test_runtime_identity_accepts_outer_height_clamped_to_physical_screen() -> None:
     config = RoxyCaptureConfig(
         api_base="http://127.0.0.1:50000",

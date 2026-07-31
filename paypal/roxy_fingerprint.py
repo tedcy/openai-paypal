@@ -698,6 +698,7 @@ def inspect_roxy_runtime_identity(cdp: Any, page: Any, config: RoxyCaptureConfig
         "headless_ua": "HeadlessChrome/" in user_agent,
     }
     mismatches: list[str] = []
+    unobservable: list[str] = []
     if _normalized_major(product) != config.core_version:
         mismatches.append("browser_product")
     if _normalized_major(user_agent) != config.core_version:
@@ -723,8 +724,15 @@ def inspect_roxy_runtime_identity(cdp: Any, page: Any, config: RoxyCaptureConfig
         mismatches.append("hardware_concurrency")
     if observed["device_memory"] != config.device_memory:
         mismatches.append("device_memory")
-    if config.do_not_track and observed["do_not_track"] != "1":
-        mismatches.append("do_not_track")
+    if config.do_not_track:
+        if not observed["do_not_track"]:
+            # The first Roxy Page can still be a chrome:// or
+            # chrome-untrusted:// new-tab document. DNT is not exposed there
+            # consistently, so preserve the evidence without blocking the
+            # first ordinary HTTPS navigation.
+            unobservable.append("do_not_track")
+        elif observed["do_not_track"] != "1":
+            mismatches.append("do_not_track")
     expected_geolocation_permission = {
         0: "prompt",
         1: "granted",
@@ -767,6 +775,7 @@ def inspect_roxy_runtime_identity(cdp: Any, page: Any, config: RoxyCaptureConfig
         "policy": asdict(ROXY_FINGERPRINT_POLICY),
         "observed": observed,
         "mismatches": mismatches,
+        "unobservable": unobservable,
         "normalizations": [
             name
             for name, enabled in (
