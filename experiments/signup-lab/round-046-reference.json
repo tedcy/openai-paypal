@@ -1,0 +1,34 @@
+{
+  "round": 46,
+  "mode": "reference",
+  "control": "existing test profile with native cache clear and no CDP attachment",
+  "ba_hash": "454fb0ad09889a8a",
+  "device_name_hash": "ad44499c025490a5",
+  "mac_hash": "204f4a73dd22a738",
+  "cdp_connected": false,
+  "open_payload_overrides": "none",
+  "attempts": [
+    {
+      "proxy_hash": "2db5c5664d294e1c",
+      "cache_clear": "roxy_native_all",
+      "result": "approval_terminal_challenge",
+      "status": "not_observed_without_cdp"
+    },
+    {
+      "proxy_hash": "b170ad567bb537c7",
+      "cache_clear": "roxy_native_all",
+      "result": "approval_pay_login_ready",
+      "status": "not_observed_without_cdp",
+      "page_title": "Pay with PayPal"
+    }
+  ],
+  "profile_cleanup": "left_open_not_deleted",
+  "evidence": [
+    "both attempts used the same existing Profile, BA hash, refreshed device name, refreshed MAC, zero CDP attachment, and a minimal browser/open payload",
+    "the first fresh SID reached a terminal security challenge",
+    "after changing only the SID and repeating Roxy native type=all cache clearing, the same BA loaded the normal approval/pay login page",
+    "the successful page exposed the email field, Next control, and Create an Account control",
+    "no challenge control, signup field, OTP, card, funding, or authorization action was submitted"
+  ],
+  "conclusion": "The proxy SID is the discriminating variable in this no-CDP pair. Keep CDP detached while using the successful open Profile as the next UI-only baseline; this result proves approval/pay readiness but not checkoutweb signup readiness."
+}
