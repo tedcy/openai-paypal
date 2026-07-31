@@ -15,6 +15,7 @@ from paypal.signup_lab import (
     RoxySignupLab,
     SignupLabInputs,
     _approval_document_has_status,
+    _configure_roxy_for_randomized_ios,
     _configure_roxy_for_signup_lab,
     _create_dedicated_control_page,
     _hash,
@@ -325,6 +326,42 @@ def test_signup_lab_allows_slow_roxy_profile_startup() -> None:
     assert config.close_after_capture is False
     assert config.delete_after_capture is False
     assert config.timeout_seconds == 60.0
+
+
+def test_signup_lab_new_profiles_use_randomized_ios_lifecycle() -> None:
+    config = SimpleNamespace(
+        core_type="Chrome",
+        core_version="136",
+        os_name="macOS",
+        os_version="15",
+        web_rtc_mode=1,
+        headless=True,
+        force_open=True,
+        close_before_open=True,
+        close_after_capture=True,
+        delete_after_capture=True,
+        timeout_seconds=12.0,
+    )
+
+    _configure_roxy_for_randomized_ios(config)
+
+    assert config.core_type == "Chrome"
+    assert config.core_version == "136"
+    assert config.os_name == "IOS"
+    assert config.os_version == "18"
+    assert config.web_rtc_mode == 0
+    assert config.headless is False
+    assert config.force_open is False
+    assert config.close_before_open is False
+    assert config.close_after_capture is False
+    assert config.delete_after_capture is False
+    assert config.timeout_seconds == 60.0
+
+    source = inspect.getsource(RoxySignupLab.run)
+    assert "preserve_randomized=True" in source
+    assert "refresh_host_identity=True" in source
+    assert "open_existing_profile_preserving_settings" in source
+    assert "preserve_randomized=not existing_control" in source
 
 
 def test_signup_document_requires_healthy_signup_html() -> None:

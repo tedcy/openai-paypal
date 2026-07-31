@@ -29,9 +29,7 @@ from paypal.proxy import ProxyEntry
 from paypal.roxy_fingerprint import (
     RoxyApiClient,
     RoxyFingerprintError,
-    ROXY_FINGERPRINT_POLICY,
     _connect_over_cdp,
-    _roxy_open_args,
     _roxy_profile_startup_args,
     inspect_roxy_runtime_identity,
     load_roxy_capture_config,
@@ -383,6 +381,7 @@ class BrowserSignupContext:
     same_context_page: bool = True
     browser_create_args: list[str] = field(default_factory=list)
     browser_open_args: list[str] = field(default_factory=list)
+    browser_open_mode: str = ""
     http2_disabled_requested: bool = False
     transport_summary: dict[str, Any] = field(default_factory=dict)
     capture_integrity: dict[str, Any] = field(default_factory=dict)
@@ -419,6 +418,40 @@ def _configure_roxy_for_signup_lab(config: Any) -> None:
         float(config.timeout_seconds),
         _SIGNUP_LAB_ROXY_API_TIMEOUT_SECONDS,
     )
+
+
+def _configure_roxy_for_randomized_ios(config: Any) -> None:
+    """Use the approval-control fingerprint lifecycle for new lab Profiles."""
+    config.core_type = "Chrome"
+    config.core_version = "136"
+    config.os_name = "IOS"
+    config.os_version = "18"
+    config.web_rtc_mode = 0
+    config.headless = False
+    # The successful control opens the persisted Profile without launch-time
+    # mutation. Headed mode is already frozen into the Profile itself.
+    config.force_open = False
+    config.close_before_open = False
+    config.close_after_capture = False
+    config.delete_after_capture = False
+    config.timeout_seconds = max(
+        float(config.timeout_seconds),
+        _SIGNUP_LAB_ROXY_API_TIMEOUT_SECONDS,
+    )
+
+
+def _randomized_ios_policy_summary(config: Any) -> dict[str, Any]:
+    return {
+        "name": "ios18-chrome136-randomized",
+        "core_type": str(config.core_type),
+        "core_version": str(config.core_version),
+        "os_name": str(config.os_name),
+        "os_version": str(config.os_version),
+        "web_rtc_mode": int(config.web_rtc_mode),
+        "headless": bool(config.headless),
+        "random_fingerprint": True,
+        "refresh_host_identity": True,
+    }
 
 
 class CdpCapture:
@@ -1021,18 +1054,25 @@ class RoxySignupLab:
             proxy_url="" if existing_control else self.proxy_entry.url,
             browser_profile=profile,
         )
-        _configure_roxy_for_signup_lab(config)
+        if existing_control:
+            _configure_roxy_for_signup_lab(config)
+        else:
+            _configure_roxy_for_randomized_ios(config)
         if config.workspace_id is None or config.project_id is None:
             raise RoxyFingerprintError("signup lab requires fixed PAYPAL_ROXY_WORKSPACE_ID and PAYPAL_ROXY_PROJECT_ID")
         client = RoxyApiClient(config)
         context_result = BrowserSignupContext(
             workspace_id=config.workspace_id,
             project_id=config.project_id,
-            profile_source="existing_clean_control" if existing_control else "created",
+            profile_source=(
+                "existing_clean_control"
+                if existing_control
+                else "created_randomized_ios"
+            ),
             fingerprint_policy=(
                 {"source": "existing_profile_preserved"}
                 if existing_control
-                else asdict(ROXY_FINGERPRINT_POLICY)
+                else _randomized_ios_policy_summary(config)
             ),
             browser_force_open_requested=(False if existing_control else bool(config.force_open)),
             window_hold_seconds=self.window_hold_seconds,
@@ -1044,12 +1084,16 @@ class RoxySignupLab:
                 open_width=config.open_width,
                 open_height=config.open_height,
             )
-            context_result.browser_open_args = _roxy_open_args(
-                config.proxy_url,
-                open_width=config.open_width,
-                open_height=config.open_height,
+            context_result.browser_open_mode = "preserve_randomized_profile_settings"
+        else:
+            context_result.browser_open_mode = "preserve_existing_profile_settings"
+        context_result.http2_disabled_requested = any(
+            value == "--disable-http2"
+            for value in (
+                *context_result.browser_create_args,
+                *context_result.browser_open_args,
             )
-        context_result.http2_disabled_requested = "--disable-http2" in context_result.browser_open_args
+        )
         profile_id = ""
         succeeded = False
         browser = None
@@ -1096,7 +1140,12 @@ class RoxySignupLab:
                 },
             )
             if not existing_control:
-                profile_freeze = client.randomize_and_freeze_profile(config.workspace_id, profile_id)
+                profile_freeze = client.randomize_and_freeze_profile(
+                    config.workspace_id,
+                    profile_id,
+                    preserve_randomized=True,
+                    refresh_host_identity=True,
+                )
                 context_result.profile_freeze = dict(profile_freeze.get("verification") or {})
                 _write_json(
                     self.capture_root / "browser" / "roxy_profile_detail.json",
@@ -1107,7 +1156,10 @@ class RoxySignupLab:
                 )
                 if not context_result.profile_freeze.get("verified"):
                     raise RuntimeError("ROXY_PROFILE_POLICY_MISMATCH")
-                cdp_info = client.open_profile(config.workspace_id, profile_id)
+                cdp_info = client.open_existing_profile_preserving_settings(
+                    config.workspace_id,
+                    profile_id,
+                )
             endpoint = _connect_over_cdp(cdp_info)
             with sync_playwright() as playwright:
                 browser = playwright.chromium.connect_over_cdp(endpoint, timeout=int(config.timeout_seconds * 1000))
@@ -1130,7 +1182,12 @@ class RoxySignupLab:
                     )
                 capture = CdpCapture(cdp, self.capture_root / "browser", pause_signup=self.mode == "handoff")
                 capture.start()
-                context_result.runtime_fingerprint = inspect_roxy_runtime_identity(cdp, page, config)
+                context_result.runtime_fingerprint = inspect_roxy_runtime_identity(
+                    cdp,
+                    page,
+                    config,
+                    preserve_randomized=not existing_control,
+                )
                 _write_json(
                     self.capture_root / "browser" / "runtime_fingerprint.json",
                     context_result.runtime_fingerprint,
@@ -1284,6 +1341,7 @@ class RoxySignupLab:
             "browser_transport": {
                 "create_args": context_result.browser_create_args,
                 "open_args": context_result.browser_open_args,
+                "open_mode": context_result.browser_open_mode,
                 "http2_disabled_requested": context_result.http2_disabled_requested,
                 **context_result.transport_summary,
             },
@@ -1426,20 +1484,7 @@ class RoxyApprovalControl:
 
     @staticmethod
     def _configure_ios_randomized(config: Any) -> None:
-        config.core_type = "Chrome"
-        config.core_version = "136"
-        config.os_name = "IOS"
-        config.os_version = "18"
-        config.web_rtc_mode = 0
-        config.headless = False
-        config.force_open = False
-        config.close_before_open = False
-        config.close_after_capture = False
-        config.delete_after_capture = False
-        config.timeout_seconds = max(
-            float(config.timeout_seconds),
-            _SIGNUP_LAB_ROXY_API_TIMEOUT_SECONDS,
-        )
+        _configure_roxy_for_randomized_ios(config)
 
     @staticmethod
     def _control_flags(page: Any) -> dict[str, bool]:
