@@ -1,0 +1,19 @@
+{
+  "round": 15,
+  "mode": "reference",
+  "status": "ROXY_LOCAL_API_OPEN_TIMEOUT",
+  "ba_hash": "20b1939e7a12c001",
+  "proxy_hash": "1ca1868089ae2dba",
+  "country": "BA",
+  "ui_generation": "unknown",
+  "last_stage": "roxy_profile_open",
+  "evidence": [
+    "the signup lab local API client timed out before receiving browser/open",
+    "the exact Roxy profile launched successfully after the client timeout",
+    "no CDP session was attached and no target document navigation occurred",
+    "the result is a local Roxy timing issue and does not trigger BA or proxy rotation"
+  ],
+  "dead_ends": [],
+  "next_round_focus": "raise the signup-lab Roxy API timeout floor and repeat the unchanged BA/proxy reference",
+  "capture_path": "captures/signup-lab/round-015-ba-http1-reference"
+}
