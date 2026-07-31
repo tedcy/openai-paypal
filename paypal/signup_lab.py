@@ -49,6 +49,7 @@ _INVALID_BA_MARKERS = (
     "expired ba token",
 )
 _SIGNUP_LAB_ROXY_API_TIMEOUT_SECONDS = 60.0
+_COUNTRY_OPTION_TIMEOUT_SECONDS = 10.0
 _COUNTRY_SELECTION_LABELS: dict[str, tuple[str, ...]] = {
     "BR": (r"Brazil", r"\+55"),
     "TH": (r"Thailand", r"\+66"),
@@ -460,24 +461,28 @@ class RoxySignupLab:
 
         patterns = _COUNTRY_SELECTION_LABELS.get(country_code, ())
         selected = False
-        for label in patterns:
-            matcher = re.compile(label, re.I)
-            candidates = (
-                page.get_by_role("option", name=matcher),
-                page.get_by_role("menuitem", name=matcher),
-                page.get_by_role("button", name=matcher),
-                page.get_by_text(matcher, exact=False),
-            )
-            for locator in candidates:
-                try:
-                    if locator.count() and locator.first.is_visible():
-                        locator.first.click(timeout=5000)
-                        selected = True
-                        break
-                except Exception:
-                    continue
-            if selected:
-                break
+        option_deadline = time.monotonic() + _COUNTRY_OPTION_TIMEOUT_SECONDS
+        while not selected and time.monotonic() < option_deadline:
+            for label in patterns:
+                matcher = re.compile(label, re.I)
+                candidates = (
+                    page.get_by_role("option", name=matcher),
+                    page.get_by_role("menuitem", name=matcher),
+                    page.get_by_role("button", name=matcher),
+                    page.get_by_text(matcher, exact=False),
+                )
+                for locator in candidates:
+                    try:
+                        if locator.count() and locator.first.is_visible():
+                            locator.first.click(timeout=5000)
+                            selected = True
+                            break
+                    except Exception:
+                        continue
+                if selected:
+                    break
+            if not selected:
+                page.wait_for_timeout(250)
         if not selected:
             self._capture_controls(page, context, "pay_country_option_missing")
             raise RuntimeError("ROXY_COUNTRY_OPTION_MISSING")
