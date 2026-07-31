@@ -124,6 +124,11 @@ def test_randomize_and_freeze_preserves_roxy_noise_and_reapplies_policy() -> Non
         "osVersion": "15",
         "windowName": "paypal-fp-test",
         "windowRemark": "paypal runtime fingerprint capture",
+        "userAgent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/136.0.7103.93 Safari/537.36"
+        ),
         "fingerInfo": {
             "canvas": {"noise": "roxy-generated"},
             "audioContext": {"noise": "roxy-generated"},
@@ -150,6 +155,7 @@ def test_randomize_and_freeze_preserves_roxy_noise_and_reapplies_policy() -> Non
             "coreVersion": modified["coreVersion"],
             "os": modified["os"],
             "osVersion": modified["osVersion"],
+            "userAgent": modified["userAgent"],
             "fingerInfo": modified["fingerInfo"],
         }
 
@@ -168,12 +174,67 @@ def test_randomize_and_freeze_preserves_roxy_noise_and_reapplies_policy() -> Non
     assert modified["coreVersion"] == "136"
     assert modified["os"] == "macOS"
     assert modified["osVersion"] == "15"
+    assert "Chrome/136." in modified["userAgent"]
     assert modified["fingerInfo"]["webRTC"] == 0
     assert modified["fingerInfo"]["randomFingerprint"] is False
     assert modified["fingerInfo"]["canvas"] == {"noise": "roxy-generated"}
     assert modified["fingerInfo"]["audioContext"] == {"noise": "roxy-generated"}
     assert modified["fingerInfo"]["webGLManufacturer"] == "Google Inc. (Intel Inc.)"
     assert "Apple M3" not in modified["fingerInfo"]["webGLRender"]
+
+
+def test_roxy_v4_summary_detail_uses_visible_and_acknowledged_policy_evidence() -> None:
+    client = RoxyApiClient.__new__(RoxyApiClient)
+    client.config = RoxyCaptureConfig(
+        api_base="http://127.0.0.1:50000",
+        api_key="",
+        proxy_url="http://user:password@proxy.test:3010",
+        language="en-US",
+        display_language="en-US",
+        timezone="GMT+01:00 Europe/Sarajevo",
+    )
+    generated_ua = (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/136.0.7103.62 Safari/537.36"
+    )
+    modified: dict = {}
+    details = [
+        {
+            "dirId": "owned-profile",
+            "coreVersion": "136",
+            "os": "macOS",
+            "osVersion": "15.1",
+            "userAgent": generated_ua,
+        },
+        {
+            "dirId": "owned-profile",
+            "coreVersion": "136",
+            "os": "macOS",
+            "osVersion": "15.2",
+            "userAgent": generated_ua,
+        },
+    ]
+    client.randomize_profile = lambda workspace_id, dir_id: None
+    client.get_profile_detail = lambda workspace_id, dir_id: details.pop(0)
+    client.modify_profile = lambda workspace_id, dir_id, values: modified.update(values) or {"code": 0}
+
+    result = client.randomize_and_freeze_profile(123, "owned-profile")
+    verification = result["verification"]
+
+    assert modified["userAgent"] == generated_ua
+    assert verification["verified"] is True
+    assert verification["mdf_acknowledged"] is True
+    assert verification["detail_finger_info_present"] is False
+    assert verification["mismatches"] == []
+    assert set(verification["unobservable"]) >= {
+        "core_type",
+        "web_rtc_mode",
+        "random_fingerprint",
+        "language",
+        "timezone",
+    }
+    assert verification["observed"]["os_version"] == "15.2"
 
 
 def test_runtime_identity_verification_uses_cdp_without_webrtc_probe() -> None:

@@ -419,6 +419,8 @@ def _normalized_major(value: object) -> str:
 def _profile_policy_verification(
     detail: Mapping[str, Any],
     config: RoxyCaptureConfig,
+    *,
+    mdf_acknowledged: bool,
 ) -> dict[str, Any]:
     finger_info = _profile_finger_info(detail)
     observed = {
@@ -433,6 +435,7 @@ def _profile_policy_verification(
         "timezone": str(finger_info.get("timeZone") or ""),
         "open_width": str(finger_info.get("openWidth") or ""),
         "open_height": str(finger_info.get("openHeight") or ""),
+        "user_agent": str(detail.get("userAgent") or detail.get("user_agent") or ""),
     }
     expected = {
         "core_type": config.core_type,
@@ -446,15 +449,27 @@ def _profile_policy_verification(
         "timezone": config.timezone,
         "open_width": str(config.open_width),
         "open_height": str(config.open_height),
+        "user_agent_major": config.core_version,
     }
     mismatches: list[str] = []
-    if observed["core_type"].lower() != expected["core_type"].lower():
+    unobservable: list[str] = []
+    if not observed["core_type"]:
+        unobservable.append("core_type")
+    elif observed["core_type"].lower() != expected["core_type"].lower():
         mismatches.append("core_type")
     if _normalized_major(observed["core_version"]) != _normalized_major(expected["core_version"]):
         mismatches.append("core_version")
+    if observed["os_name"] != expected["os_name"]:
+        mismatches.append("os_name")
+    if _normalized_major(observed["os_version"]) != _normalized_major(expected["os_version"]):
+        mismatches.append("os_version")
+    user_agent = observed["user_agent"]
+    if (
+        _normalized_major(user_agent) != config.core_version
+        or "macintosh" not in user_agent.lower()
+    ):
+        mismatches.append("user_agent")
     for key in (
-        "os_name",
-        "os_version",
         "web_rtc_mode",
         "random_fingerprint",
         "language",
@@ -463,15 +478,21 @@ def _profile_policy_verification(
         "open_width",
         "open_height",
     ):
-        if observed[key] != expected[key]:
+        if observed[key] is None or observed[key] == "":
+            unobservable.append(key)
+        elif observed[key] != expected[key]:
             mismatches.append(key)
     return {
-        "verified": not mismatches,
+        "verified": bool(mdf_acknowledged and not mismatches),
+        "mdf_acknowledged": bool(mdf_acknowledged),
+        "detail_finger_info_present": bool(finger_info),
         "policy": asdict(ROXY_FINGERPRINT_POLICY),
         "expected": expected,
         "observed": observed,
         "mismatches": mismatches,
+        "unobservable": unobservable,
         "generated_fields": {
+            "user_agent_present": bool(user_agent),
             "canvas_present": "canvas" in finger_info,
             "audio_context_present": "audioContext" in finger_info,
             "webgl_manufacturer_present": bool(finger_info.get("webGLManufacturer")),
@@ -936,10 +957,10 @@ class RoxyApiClient:
         workspace_id: int,
         dir_id: str,
         values: Mapping[str, Any],
-    ) -> None:
+    ) -> dict[str, Any]:
         payload = dict(values)
         payload.update({"workspaceId": workspace_id, "dirId": dir_id})
-        self.request("POST", "/browser/mdf", json=payload)
+        return self.request("POST", "/browser/mdf", json=payload)
 
     def randomize_and_freeze_profile(
         self,
@@ -988,12 +1009,16 @@ class RoxyApiClient:
             "proxyInfo": _roxy_proxy_info(self.config.proxy_url),
             "fingerInfo": finger_info,
         }
-        for key in ("windowName", "windowRemark", "searchEngine"):
+        for key in ("windowName", "windowRemark", "searchEngine", "userAgent"):
             if key in before:
                 values[key] = before[key]
         self.modify_profile(workspace_id, dir_id, values)
         after = self.get_profile_detail(workspace_id, dir_id)
-        verification = _profile_policy_verification(after, self.config)
+        verification = _profile_policy_verification(
+            after,
+            self.config,
+            mdf_acknowledged=True,
+        )
         logger.info(
             "Roxy profile policy verification dir_id={} verified={} mismatches={} generated_fields={}",
             dir_id,
