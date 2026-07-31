@@ -51,15 +51,76 @@ def _query_keys(url: str) -> list[str]:
     return [name for name, _ in urllib.parse.parse_qsl(urllib.parse.urlsplit(url or "").query, keep_blank_values=True)]
 
 
+_BROWSER_EVENT_KINDS = {
+    "requestWillBeSent",
+    "requestWillBeSentExtraInfo",
+    "responseReceived",
+    "responseReceivedExtraInfo",
+    "loadingFinished",
+    "loadingFailed",
+    "signupRequestPaused",
+}
+
+
+def _browser_event_kind(event: dict[str, Any]) -> str:
+    explicit = str(event.get("event_kind") or "")
+    if explicit:
+        return explicit
+    legacy = str(event.get("type") or "")
+    if legacy in _BROWSER_EVENT_KINDS:
+        return legacy
+    # Round 1-11 placed the CDP event type before **event, so Document/XHR
+    # overwrote the recorder kind. Infer those two unambiguous shapes.
+    if isinstance(event.get("request"), dict):
+        return "requestWillBeSent"
+    if isinstance(event.get("response"), dict):
+        return "responseReceived"
+    return legacy
+
+
+def _browser_transport_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
+    requests = responses = loading_failed = 0
+    protocols: dict[str, int] = defaultdict(int)
+    documents: list[dict[str, Any]] = []
+    for event in events:
+        kind = _browser_event_kind(event)
+        if kind == "requestWillBeSent":
+            requests += 1
+        elif kind == "responseReceived":
+            responses += 1
+            response = dict(event.get("response") or {})
+            url = str(response.get("url") or "")
+            protocol = str(response.get("protocol") or "unknown")
+            if urllib.parse.urlsplit(url).scheme.lower() == "https":
+                protocols[protocol] += 1
+            resource_type = str(event.get("resource_type") or event.get("type") or "")
+            if resource_type == "Document":
+                documents.append({
+                    "path": urllib.parse.urlsplit(url).path or "/",
+                    "status": int(response.get("status") or 0),
+                    "protocol": protocol,
+                })
+        elif kind == "loadingFailed":
+            loading_failed += 1
+    return {
+        "request_events": requests,
+        "response_events": responses,
+        "request_response_delta": requests - responses,
+        "loading_failed_events": loading_failed,
+        "https_protocol_counts": dict(sorted(protocols.items())),
+        "main_documents": documents,
+    }
+
+
 def _normalize(events: list[dict[str, Any]], source: str) -> list[dict[str, Any]]:
     output: list[dict[str, Any]] = []
     if source == "browser":
         extra: dict[str, dict[str, Any]] = {}
         for event in events:
-            if event.get("type") == "requestWillBeSentExtraInfo":
+            if _browser_event_kind(event) == "requestWillBeSentExtraInfo":
                 extra[str(event.get("requestId") or "")] = dict(event.get("headers") or {})
         for index, event in enumerate(events):
-            if event.get("type") != "requestWillBeSent":
+            if _browser_event_kind(event) != "requestWillBeSent":
                 continue
             request = dict(event.get("request") or {})
             url = str(request.get("url") or "")
@@ -91,7 +152,8 @@ def compare(program_root: str | Path, browser_root: str | Path) -> dict[str, Any
     program_root = Path(program_root).resolve()
     browser_root = Path(browser_root).resolve()
     protocol = _normalize(_read_jsonl(program_root / "network" / "events.jsonl"), "protocol")
-    browser = _normalize(_read_jsonl(browser_root / "network" / "events.jsonl"), "browser")
+    browser_events = _read_jsonl(browser_root / "network" / "events.jsonl")
+    browser = _normalize(browser_events, "browser")
     p_groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
     b_groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in protocol:
@@ -130,6 +192,7 @@ def compare(program_root: str | Path, browser_root: str | Path) -> dict[str, Any
     return {
         "program_root": str(program_root), "browser_root": str(browser_root),
         "protocol_requests": len(protocol), "browser_requests": len(browser),
+        "browser_transport": _browser_transport_summary(browser_events),
         "pairs": pairs, "findings": findings,
         "transport_note": "Application-layer equality does not prove Chrome-equivalent TLS/HTTP2 wire behavior.",
     }

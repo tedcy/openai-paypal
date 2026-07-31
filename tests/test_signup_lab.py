@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 import httpx
 
-from paypal.signup_lab import RoxySignupLab, SignupLabInputs, classify_signup_document
+from paypal.signup_lab import CdpCapture, RoxySignupLab, SignupLabInputs, classify_signup_document
 from paypal.traffic_recorder import TrafficRecorder
 from tools.compare_paypal_traffic import compare
 
@@ -112,6 +112,88 @@ def test_compare_aligns_by_stage_method_and_path(tmp_path) -> None:
     assert report["protocol_requests"] == 1
     assert report["browser_requests"] == 1
     assert report["pairs"][0]["key"].startswith("signup:GET:")
+
+
+def test_cdp_capture_preserves_event_kind_and_transport_summary(tmp_path) -> None:
+    capture = CdpCapture(None, tmp_path / "browser", pause_signup=False)
+    capture._request({
+        "requestId": "1",
+        "type": "Document",
+        "request": {"method": "GET", "url": "https://www.paypal.com/pay?token=secret"},
+    })
+    capture._response({
+        "requestId": "1",
+        "type": "Document",
+        "response": {
+            "url": "https://www.paypal.com/pay?token=secret",
+            "status": 200,
+            "protocol": "http/1.1",
+            "mimeType": "text/html",
+        },
+    })
+
+    rows = [json.loads(line) for line in capture.events_path.read_text(encoding="utf-8").splitlines()]
+    assert rows[0]["event_kind"] == "requestWillBeSent"
+    assert rows[0]["resource_type"] == "Document"
+    assert rows[1]["event_kind"] == "responseReceived"
+    assert capture.transport_summary() == {
+        "request_events": 1,
+        "response_events": 1,
+        "request_response_delta": 0,
+        "loading_failed_events": 0,
+        "https_protocol_counts": {"http/1.1": 1},
+        "main_documents": [{
+            "path": "/pay",
+            "status": 200,
+            "protocol": "http/1.1",
+            "mime_type": "text/html",
+        }],
+    }
+
+
+def test_compare_supports_new_and_overwritten_legacy_cdp_events(tmp_path) -> None:
+    protocol = tmp_path / "protocol" / "network"
+    browser = tmp_path / "browser" / "network"
+    protocol.mkdir(parents=True)
+    browser.mkdir(parents=True)
+    (protocol / "events.jsonl").write_text("", encoding="utf-8")
+    events = [
+        {
+            "event_kind": "requestWillBeSent",
+            "resource_type": "Document",
+            "requestId": "new",
+            "request": {"method": "GET", "url": "https://www.paypal.com/pay"},
+        },
+        {
+            "event_kind": "responseReceived",
+            "resource_type": "Document",
+            "requestId": "new",
+            "response": {"url": "https://www.paypal.com/pay", "status": 200, "protocol": "http/1.1"},
+        },
+        {
+            "type": "Document",
+            "requestId": "legacy",
+            "request": {"method": "GET", "url": "https://www.paypal.com/checkoutweb/signup"},
+        },
+        {
+            "type": "Document",
+            "requestId": "legacy",
+            "response": {"url": "https://www.paypal.com/checkoutweb/signup", "status": 403, "protocol": "h2"},
+        },
+    ]
+    (browser / "events.jsonl").write_text(
+        "\n".join(json.dumps(event) for event in events) + "\n",
+        encoding="utf-8",
+    )
+
+    report = compare(tmp_path / "protocol", tmp_path / "browser")
+
+    assert report["browser_requests"] == 2
+    assert report["browser_transport"]["https_protocol_counts"] == {"h2": 1, "http/1.1": 1}
+    assert [doc["path"] for doc in report["browser_transport"]["main_documents"]] == [
+        "/pay",
+        "/checkoutweb/signup",
+    ]
 
 
 def test_signup_lab_contains_no_network_or_cdp_discovery() -> None:

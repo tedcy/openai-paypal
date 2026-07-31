@@ -28,6 +28,7 @@ from paypal.roxy_fingerprint import (
     RoxyApiClient,
     RoxyFingerprintError,
     _connect_over_cdp,
+    _roxy_open_args,
     load_roxy_capture_config,
 )
 from paypal.traffic_recorder import TrafficRecorder, clear_current_traffic_recorder, set_current_traffic_recorder
@@ -70,6 +71,27 @@ def _append_jsonl(path: Path, value: object) -> None:
 
 def _safe_filename(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "_", value)[:100] or "body"
+
+
+def _stage_timing_summary(stages: list[dict[str, Any]]) -> dict[str, Any]:
+    parsed: list[tuple[datetime, str]] = []
+    for item in stages:
+        raw = str(item.get("time") or "")
+        try:
+            stamp = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        parsed.append((stamp, str(item.get("event") or "unknown")))
+    if not parsed:
+        return {"total_elapsed_ms": 0, "milestones": []}
+    started = parsed[0][0]
+    return {
+        "total_elapsed_ms": max(0, int((parsed[-1][0] - started).total_seconds() * 1000)),
+        "milestones": [
+            {"event": event, "elapsed_ms": max(0, int((stamp - started).total_seconds() * 1000))}
+            for stamp, event in parsed
+        ],
+    }
 
 
 def classify_signup_document(status: int, content_type: str, body: str, url: str) -> dict[str, Any]:
@@ -156,6 +178,10 @@ class BrowserSignupContext:
     profile_id: str = ""
     profile_retained: bool = False
     same_context_page: bool = True
+    browser_open_args: list[str] = field(default_factory=list)
+    http2_disabled_requested: bool = False
+    transport_summary: dict[str, Any] = field(default_factory=dict)
+    stage_timing: dict[str, Any] = field(default_factory=dict)
 
 
 class CdpCapture:
@@ -170,6 +196,11 @@ class CdpCapture:
         self.extra_headers: dict[str, dict[str, Any]] = {}
         self.responses: dict[str, dict[str, Any]] = {}
         self.challenge_urls: list[str] = []
+        self.request_event_count = 0
+        self.response_event_count = 0
+        self.loading_failed_count = 0
+        self.https_protocol_counts: dict[str, int] = {}
+        self.main_documents: list[dict[str, Any]] = []
 
     def start(self) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
@@ -180,15 +211,21 @@ class CdpCapture:
         self.cdp.on("Network.responseReceived", self._response)
         self.cdp.on("Network.responseReceivedExtraInfo", self._response_extra)
         self.cdp.on("Network.loadingFinished", self._finished)
-        self.cdp.on("Network.loadingFailed", lambda event: self._record("loadingFailed", event))
+        self.cdp.on("Network.loadingFailed", self._loading_failed)
         if self.pause_signup:
             self.cdp.send("Fetch.enable", {"patterns": [{"urlPattern": "*://*/checkoutweb/signup*", "resourceType": "Document", "requestStage": "Request"}]})
             self.cdp.on("Fetch.requestPaused", self._paused)
 
     def _record(self, kind: str, event: Mapping[str, Any]) -> None:
-        _append_jsonl(self.events_path, {"time": _utc_now(), "type": kind, **dict(event)})
+        payload = dict(event)
+        resource_type = payload.pop("type", None)
+        row: dict[str, Any] = {"time": _utc_now(), "event_kind": kind, **payload}
+        if resource_type is not None:
+            row["resource_type"] = resource_type
+        _append_jsonl(self.events_path, row)
 
     def _request(self, event: dict[str, Any]) -> None:
+        self.request_event_count += 1
         request_id = str(event.get("requestId") or "")
         self.requests[request_id] = event
         url = str((event.get("request") or {}).get("url") or "")
@@ -203,12 +240,41 @@ class CdpCapture:
         self._record("requestWillBeSentExtraInfo", event)
 
     def _response(self, event: dict[str, Any]) -> None:
+        self.response_event_count += 1
         request_id = str(event.get("requestId") or "")
         self.responses[request_id] = event
+        response = dict(event.get("response") or {})
+        url = str(response.get("url") or "")
+        protocol = str(response.get("protocol") or "unknown")
+        if urllib.parse.urlsplit(url).scheme.lower() == "https":
+            self.https_protocol_counts[protocol] = self.https_protocol_counts.get(protocol, 0) + 1
+        if str(event.get("type") or "") == "Document":
+            self.main_documents.append(
+                {
+                    "path": urllib.parse.urlsplit(url).path or "/",
+                    "status": int(response.get("status") or 0),
+                    "protocol": protocol,
+                    "mime_type": str(response.get("mimeType") or ""),
+                }
+            )
         self._record("responseReceived", event)
 
     def _response_extra(self, event: dict[str, Any]) -> None:
         self._record("responseReceivedExtraInfo", event)
+
+    def _loading_failed(self, event: dict[str, Any]) -> None:
+        self.loading_failed_count += 1
+        self._record("loadingFailed", event)
+
+    def transport_summary(self) -> dict[str, Any]:
+        return {
+            "request_events": self.request_event_count,
+            "response_events": self.response_event_count,
+            "request_response_delta": self.request_event_count - self.response_event_count,
+            "loading_failed_events": self.loading_failed_count,
+            "https_protocol_counts": dict(sorted(self.https_protocol_counts.items())),
+            "main_documents": list(self.main_documents),
+        }
 
     def _finished(self, event: dict[str, Any]) -> None:
         self._record("loadingFinished", event)
@@ -521,6 +587,8 @@ class RoxySignupLab:
             raise RoxyFingerprintError("signup lab requires fixed PAYPAL_ROXY_WORKSPACE_ID and PAYPAL_ROXY_PROJECT_ID")
         client = RoxyApiClient(config)
         context_result = BrowserSignupContext(workspace_id=config.workspace_id, project_id=config.project_id)
+        context_result.browser_open_args = _roxy_open_args(config.proxy_url)
+        context_result.http2_disabled_requested = "--disable-http2" in context_result.browser_open_args
         profile_id = ""
         succeeded = False
         browser = None
@@ -634,6 +702,10 @@ class RoxySignupLab:
                 context_result.profile_retained = True
             client.close()
 
+        if capture is not None:
+            context_result.transport_summary = capture.transport_summary()
+        context_result.stage_timing = _stage_timing_summary(context_result.stages)
+
         raw = asdict(context_result)
         _write_json(self.capture_root / "browser_signup_context.json", raw)
         safe = {
@@ -643,6 +715,12 @@ class RoxySignupLab:
             "country": self.country_profile.country,
             "http_status": context_result.http_status,
             "classification": context_result.classification,
+            "browser_transport": {
+                "open_args": context_result.browser_open_args,
+                "http2_disabled_requested": context_result.http2_disabled_requested,
+                **context_result.transport_summary,
+            },
+            "stage_timing": context_result.stage_timing,
             "profile_retained": context_result.profile_retained,
             "capture_root": str(self.capture_root),
         }
