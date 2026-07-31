@@ -1,0 +1,27 @@
+{
+  "round": 73,
+  "mode": "handoff",
+  "control": "current second BA candidate after exact retained-window closure, using a fresh randomized iOS Profile and SID",
+  "ba_hash": "86d9fa61df4d6bcb",
+  "proxy_hash": "e8acaa8055a8bc60",
+  "profile_hash": "470a62f50cf6f1a5",
+  "result": "PAY_CREATE_ACCOUNT_ACTIONABILITY_TIMEOUT_AFTER_SLOW_APPROVAL",
+  "http_status": 0,
+  "approval_document_status": 200,
+  "approval_protocol": "http/1.1",
+  "request_events": 48,
+  "response_events": 10,
+  "signup_request_paused_count": 0,
+  "protocol_request_sent": false,
+  "capture_integrity": "valid_100_of_100",
+  "profile_cleanup": "closed_retained_pending_exact_cleanup",
+  "network_environment_inspected": false,
+  "evidence": [
+    "closing eight exact retained lab windows removed the prior local Roxy create quota failure without listing Profiles",
+    "approval committed as an HTTP 200 document over HTTP/1.1 and did not enter checkoutweb/genericError",
+    "the approval email action completed only after roughly 137 seconds and /pay was reached after roughly 147 seconds",
+    "the captured /pay DOM contained a visible create-account-form submit button, but the Playwright click ended with TimeoutError after the global navigation budget was nearly exhausted",
+    "no signup request, Python request, phone, OTP, registration, funding, or authorization action occurred"
+  ],
+  "conclusion": "The current BA remains active. This is a slow-page and actionability-budget failure, not a BA or protocol result. Preserve all request variables and first increase only the navigation time budget before considering a forced DOM action."
+}
