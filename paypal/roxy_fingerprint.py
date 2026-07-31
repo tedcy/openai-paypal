@@ -539,6 +539,7 @@ def inspect_roxy_runtime_identity(cdp: Any, page: Any, config: RoxyCaptureConfig
     product = str(browser_version.get("product") or "")
     platform = str(runtime.get("platform") or "")
     window = _dict_value(runtime.get("window"))
+    screen = _dict_value(runtime.get("screen"))
     observed = {
         "browser_product": product,
         "browser_protocol_version": str(browser_version.get("protocolVersion") or ""),
@@ -564,7 +565,13 @@ def inspect_roxy_runtime_identity(cdp: Any, page: Any, config: RoxyCaptureConfig
         mismatches.append("timezone")
     if observed["outer_width"] != config.open_width:
         mismatches.append("outer_width")
-    if observed["outer_height"] != config.open_height:
+    screen_height = int(screen.get("height") or 0)
+    outer_height_clamped_to_screen = bool(
+        screen_height > 0
+        and config.open_height > screen_height
+        and observed["outer_height"] == screen_height
+    )
+    if observed["outer_height"] != config.open_height and not outer_height_clamped_to_screen:
         mismatches.append("outer_height")
     if observed["headless_ua"]:
         mismatches.append("headless_ua")
@@ -573,7 +580,8 @@ def inspect_roxy_runtime_identity(cdp: Any, page: Any, config: RoxyCaptureConfig
         "policy": asdict(ROXY_FINGERPRINT_POLICY),
         "observed": observed,
         "mismatches": mismatches,
-        "screen": dict(runtime.get("screen") or {}),
+        "normalizations": ["outer_height_clamped_to_screen"] if outer_height_clamped_to_screen else [],
+        "screen": screen,
     }
 
 

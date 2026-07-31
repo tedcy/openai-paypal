@@ -279,3 +279,89 @@ def test_runtime_identity_verification_uses_cdp_without_webrtc_probe() -> None:
     assert verification["verified"] is True
     assert verification["mismatches"] == []
     assert verification["observed"]["headless_ua"] is False
+
+
+def test_runtime_identity_accepts_outer_height_clamped_to_physical_screen() -> None:
+    config = RoxyCaptureConfig(
+        api_base="http://127.0.0.1:50000",
+        api_key="",
+        language="en-US",
+        display_language="en-US",
+        timezone="GMT+01:00 Europe/Sarajevo",
+    )
+
+    class Cdp:
+        def send(self, method):
+            assert method == "Browser.getVersion"
+            return {"product": "Chrome/136.0.7103.49", "protocolVersion": "1.3"}
+
+    class Page:
+        def evaluate(self, script):
+            return {
+                "userAgent": (
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/136.0.0.0 Safari/537.36"
+                ),
+                "platform": "MacIntel",
+                "language": "en-US",
+                "languages": ["en-US"],
+                "timezone": "Europe/Sarajevo",
+                "screen": {
+                    "width": 1536,
+                    "height": 864,
+                    "availWidth": 1536,
+                    "availHeight": 824,
+                },
+                "window": {
+                    "innerWidth": 1000,
+                    "innerHeight": 777,
+                    "outerWidth": 1000,
+                    "outerHeight": 864,
+                },
+            }
+
+    verification = inspect_roxy_runtime_identity(Cdp(), Page(), config)
+
+    assert verification["verified"] is True
+    assert verification["mismatches"] == []
+    assert verification["normalizations"] == ["outer_height_clamped_to_screen"]
+
+
+def test_runtime_identity_rejects_unexplained_outer_height_mismatch() -> None:
+    config = RoxyCaptureConfig(
+        api_base="http://127.0.0.1:50000",
+        api_key="",
+        language="en-US",
+        display_language="en-US",
+        timezone="GMT+01:00 Europe/Sarajevo",
+    )
+
+    class Cdp:
+        def send(self, method):
+            return {"product": "Chrome/136.0.7103.49", "protocolVersion": "1.3"}
+
+    class Page:
+        def evaluate(self, script):
+            return {
+                "userAgent": (
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/136.0.0.0 Safari/537.36"
+                ),
+                "platform": "MacIntel",
+                "language": "en-US",
+                "languages": ["en-US"],
+                "timezone": "Europe/Sarajevo",
+                "screen": {"width": 1536, "height": 864},
+                "window": {
+                    "outerWidth": 1000,
+                    "outerHeight": 863,
+                },
+            }
+
+    verification = inspect_roxy_runtime_identity(Cdp(), Page(), config)
+
+    assert verification["verified"] is False
+    assert verification["mismatches"] == ["outer_height"]
+    assert verification["normalizations"] == []
