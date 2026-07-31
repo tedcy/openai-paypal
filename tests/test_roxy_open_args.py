@@ -170,6 +170,7 @@ def test_randomize_and_freeze_preserves_roxy_noise_and_reapplies_policy() -> Non
 
     assert events == ["random", "detail", "modify", "detail"]
     assert result["verification"]["verified"] is True
+    assert result["verification"]["finger_info_merge_source"] == "detail"
     assert modified["coreType"] == "Chrome"
     assert modified["coreVersion"] == "136"
     assert modified["os"] == "macOS"
@@ -224,6 +225,7 @@ def test_roxy_v4_summary_detail_uses_visible_and_acknowledged_policy_evidence() 
 
     assert modified["userAgent"] == generated_ua
     assert verification["verified"] is True
+    assert verification["finger_info_merge_source"] == "create_template"
     assert verification["mdf_acknowledged"] is True
     assert verification["detail_finger_info_present"] is False
     assert verification["mismatches"] == []
@@ -235,6 +237,15 @@ def test_roxy_v4_summary_detail_uses_visible_and_acknowledged_policy_evidence() 
         "timezone",
     }
     assert verification["observed"]["os_version"] == "15.2"
+    assert modified["fingerInfo"]["webRTC"] == 0
+    assert modified["fingerInfo"]["randomFingerprint"] is False
+    assert modified["fingerInfo"]["canvas"] is True
+    assert modified["fingerInfo"]["audioContext"] is True
+    assert modified["fingerInfo"]["webGL"] is True
+    assert modified["fingerInfo"]["webGLManufacturer"] == ""
+    assert modified["fingerInfo"]["webGLRender"] == ""
+    assert modified["fingerInfo"]["hardwareConcurrent"] == ""
+    assert modified["fingerInfo"]["deviceMemory"] == ""
 
 
 def test_roxy_v4_summary_omits_empty_user_agent_until_runtime_verification() -> None:
@@ -273,6 +284,7 @@ def test_roxy_v4_summary_omits_empty_user_agent_until_runtime_verification() -> 
 
     assert "userAgent" not in modified
     assert verification["verified"] is True
+    assert verification["finger_info_merge_source"] == "create_template"
     assert verification["mismatches"] == []
     assert "user_agent" in verification["unobservable"]
     assert verification["generated_fields"]["user_agent_present"] is False

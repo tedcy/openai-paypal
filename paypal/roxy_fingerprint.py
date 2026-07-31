@@ -408,6 +408,77 @@ def _profile_finger_info(detail: Mapping[str, Any]) -> dict[str, Any]:
     return dict(value) if isinstance(value, dict) else {}
 
 
+def _roxy_finger_info_template(
+    config: RoxyCaptureConfig,
+    startup_args: Iterable[str],
+    *,
+    random_fingerprint: bool,
+) -> dict[str, Any]:
+    """Build the complete create/mdf fingerprint shape understood by Roxy."""
+    return {
+        "isLanguageBaseIp": config.follow_ip,
+        "language": config.language,
+        "isDisplayLanguageBaseIp": config.follow_ip,
+        "displayLanguage": config.display_language,
+        "isTimeZone": config.follow_ip,
+        "timeZone": config.timezone,
+        "position": 0,
+        "isPositionBaseIp": config.follow_ip,
+        "forbidAudio": False,
+        "forbidImage": False,
+        "forbidMedia": False,
+        "openWidth": str(config.open_width),
+        "openHeight": str(config.open_height),
+        "openBookmarks": False,
+        "positionSwitch": False,
+        "isDisplayName": False,
+        "syncBookmark": False,
+        "syncHistory": False,
+        "syncTab": False,
+        "syncCookie": False,
+        "syncExtensions": False,
+        "syncPassword": False,
+        "syncIndexedDb": False,
+        "syncLocalStorage": False,
+        "clearCacheFile": True,
+        "clearCookie": True,
+        "clearLocalStorage": True,
+        "randomFingerprint": random_fingerprint,
+        "forbidSavePassword": True,
+        "stopOpenNet": False,
+        "stopOpenIP": False,
+        "stopOpenPosition": False,
+        "openWorkbench": 0,
+        "resolutionType": True,
+        "resolutionX": str(config.screen_width),
+        "resolutionY": str(config.screen_height),
+        "fontType": True,
+        "webRTC": config.web_rtc_mode,
+        "webGL": True,
+        "webGLInfo": True,
+        "webGLManufacturer": "",
+        "webGLRender": "",
+        "webGpu": "webgl",
+        "canvas": True,
+        "audioContext": True,
+        "speechVoices": True,
+        "doNotTrack": False,
+        "clientRects": True,
+        "deviceInfo": True,
+        "deviceNameSwitch": True,
+        "macInfo": True,
+        "hardwareConcurrent": "",
+        "deviceMemory": "",
+        "disableSsl": False,
+        "disableSslList": [],
+        "portScanProtect": True,
+        "portScanList": "",
+        "useGpu": True,
+        "sandboxPermission": False,
+        "startupParam": ";".join(startup_args),
+    }
+
+
 def _normalized_major(value: object) -> str:
     text = str(value or "")
     match = re.search(r"(?:Chrome|Chromium|RoxyChrome)/(\d+)", text, re.I)
@@ -833,71 +904,11 @@ class RoxyApiClient:
             "defaultOpenUrl": ["about:blank"],
             "windowRemark": "paypal runtime fingerprint capture",
             "proxyInfo": proxy_info,
-            "fingerInfo": {
-                "isLanguageBaseIp": self.config.follow_ip,
-                "language": self.config.language,
-                "isDisplayLanguageBaseIp": self.config.follow_ip,
-                "displayLanguage": self.config.display_language,
-                "isTimeZone": self.config.follow_ip,
-                "timeZone": self.config.timezone,
-                "position": 0,
-                "isPositionBaseIp": self.config.follow_ip,
-                "forbidAudio": False,
-                "forbidImage": False,
-                "forbidMedia": False,
-                "openWidth": str(self.config.open_width),
-                "openHeight": str(self.config.open_height),
-                "openBookmarks": False,
-                "positionSwitch": False,
-                "isDisplayName": False,
-                "syncBookmark": False,
-                "syncHistory": False,
-                "syncTab": False,
-                "syncCookie": False,
-                "syncExtensions": False,
-                "syncPassword": False,
-                "syncIndexedDb": False,
-                "syncLocalStorage": False,
-                "clearCacheFile": True,
-                "clearCookie": True,
-                "clearLocalStorage": True,
-                "randomFingerprint": True,
-                "forbidSavePassword": True,
-                "stopOpenNet": False,
-                "stopOpenIP": False,
-                "stopOpenPosition": False,
-                "openWorkbench": 0,
-                "resolutionType": True,
-                "resolutionX": str(self.config.screen_width),
-                "resolutionY": str(self.config.screen_height),
-                "fontType": True,
-                "webRTC": self.config.web_rtc_mode,
-                "webGL": True,
-                "webGLInfo": True,
-                "webGLManufacturer": "",
-                "webGLRender": "",
-                "webGpu": "webgl",
-                "canvas": True,
-                "audioContext": True,
-                "speechVoices": True,
-                "doNotTrack": False,
-                "clientRects": True,
-                "deviceInfo": True,
-                "deviceNameSwitch": True,
-                "macInfo": True,
-                "hardwareConcurrent": "",
-                "deviceMemory": "",
-                "disableSsl": False,
-                "disableSslList": [],
-                "portScanProtect": True,
-                "portScanList": "",
-                "useGpu": True,
-                "sandboxPermission": False,
-                # Roxy 4.x snapshots startup parameters before /browser/open
-                # applies its args field. Persist them on the unopened profile
-                # as well so the first Chromium process receives the flags.
-                "startupParam": ";".join(startup_args),
-            },
+            "fingerInfo": _roxy_finger_info_template(
+                self.config,
+                startup_args,
+                random_fingerprint=True,
+            ),
         }
         if self.config.core_version:
             payload["coreVersion"] = self.config.core_version
@@ -983,6 +994,18 @@ class RoxyApiClient:
         if not before:
             raise RoxyFingerprintError("ROXY_PROFILE_DETAIL_MISSING")
         finger_info = _profile_finger_info(before)
+        finger_info_merge_source = "detail"
+        if not finger_info:
+            finger_info = _roxy_finger_info_template(
+                self.config,
+                _roxy_profile_startup_args(
+                    self.config.proxy_url,
+                    open_width=self.config.open_width,
+                    open_height=self.config.open_height,
+                ),
+                random_fingerprint=True,
+            )
+            finger_info_merge_source = "create_template"
         finger_info.update(
             {
                 "isLanguageBaseIp": self.config.follow_ip,
@@ -1031,11 +1054,14 @@ class RoxyApiClient:
             self.config,
             mdf_acknowledged=True,
         )
+        verification["finger_info_merge_source"] = finger_info_merge_source
         logger.info(
-            "Roxy profile policy verification dir_id={} verified={} mismatches={} generated_fields={}",
+            "Roxy profile policy verification dir_id={} verified={} mismatches={} "
+            "finger_info_merge_source={} generated_fields={}",
             dir_id,
             verification["verified"],
             verification["mismatches"],
+            finger_info_merge_source,
             verification["generated_fields"],
         )
         return {"before": before, "after": after, "verification": verification}
