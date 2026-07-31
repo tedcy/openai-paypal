@@ -1,0 +1,21 @@
+{
+  "round": 20,
+  "mode": "manual_roxy_cdp_reference",
+  "status": "CONTACT_SIGNUP_200",
+  "ba_hash": "a75b351fac2e69d5",
+  "proxy_hash": "1ca1868089ae2dba",
+  "country": "BA",
+  "ui_generation": "contact_signup",
+  "last_stage": "pay_checkout_signup_contact",
+  "evidence": [
+    "the retained headed Roxy profile used disable-http2 before the first navigation",
+    "CDP recorded 348 target HTTPS responses over HTTP/1.1 and zero h2 responses",
+    "agreements/approve and pay/checkout/signup/contact both returned HTTP 200",
+    "the browser completed four Next.js Server Actions covering initial pay context, create-account selection, email continuation, and a locale change",
+    "two passive hCaptcha verification requests returned HTTP 200 without a terminal challenge page",
+    "the capture contained no HTTP 4xx/5xx response and no phone, OTP, GraphQL signup, funding, or authorization submission"
+  ],
+  "dead_ends": [],
+  "next_round_focus": "Diff the captured Next.js Server Action chain against protocol Phase 0/2 and preserve the browser-bound ctxId, ADS state, cookies, action identifiers, router state, and action timing; keep legacy checkoutweb handoff gated because this BA resolved to contact-signup.",
+  "capture_path": "captures/signup-lab/manual-ba-60x-cdp"
+}
