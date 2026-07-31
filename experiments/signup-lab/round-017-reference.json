@@ -1,0 +1,20 @@
+{
+  "round": 17,
+  "mode": "reference",
+  "status": "ROXY_COUNTRY_CONTROL_MISSING",
+  "ba_hash": "20b1939e7a12c001",
+  "proxy_hash": "1ca1868089ae2dba",
+  "country": "BA",
+  "ui_generation": "unknown",
+  "last_stage": "pay_country_control",
+  "evidence": [
+    "CDP remained HTTP/1.1-only for the target responses",
+    "the static DOM and control capture contained a visible Country select button",
+    "the element has an explicit combobox role, so the button-role semantic locator did not match it",
+    "the page still showed defaultValue US and hidden country code +1",
+    "no country option, phone number, SMS, registration, funding, or authorization action occurred"
+  ],
+  "dead_ends": [],
+  "next_round_focus": "locate the existing Country select by its explicit combobox role and retain all other behavior",
+  "capture_path": "captures/signup-lab/round-017-ba-country-reference"
+}
