@@ -1,0 +1,22 @@
+{
+  "round": 63,
+  "mode": "reference",
+  "control": "first full reference attempt after the created-Profile approval gate",
+  "ba_hash": "15e96bc757b6d93f",
+  "proxy_hash": "f193671abf99f7d3",
+  "profile_hash": "e3b0c44298fc1c14",
+  "result": "ROXY_PROFILE_QUOTA_BEFORE_TARGET",
+  "target_requests": 0,
+  "http_status": 0,
+  "ui_generation": "unknown",
+  "profile_created": false,
+  "capture_integrity": "not_started",
+  "network_environment_inspected": false,
+  "evidence": [
+    "the fixed localhost Roxy API rejected browser/create with a Profile quota error",
+    "no Profile ID, CDP endpoint, browser page, or target request was created",
+    "the BA therefore received no business response and the operator-defined genericError failover rule does not apply",
+    "the exact closed Profile created by Round 62 was then deleted without listing or touching any other Profile"
+  ],
+  "conclusion": "Retry the unchanged reference after exact owned-Profile cleanup. Because Round 63 never created a Profile or used the proxy at the target, reuse its reserved SID and keep BA candidate one selected."
+}
