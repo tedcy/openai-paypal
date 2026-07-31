@@ -1,0 +1,43 @@
+{
+  "round": 61,
+  "mode": "approval-control",
+  "control": "third fresh-SID test Profile sample for newly supplied BA candidate one",
+  "ba_hash": "15e96bc757b6d93f",
+  "proxy_hash": "2157965696280f3d",
+  "profile_hash": "ee3917e3ec1305dc",
+  "proxy_cursor": {
+    "selected": 29,
+    "next": 30,
+    "quarantined": true
+  },
+  "fingerprint_runtime": {
+    "verified": true,
+    "browser": "Chrome 136.0.7103.49",
+    "user_agent": "iOS 18 CriOS 136.0.7103.49",
+    "platform": "iPhone",
+    "headless": false
+  },
+  "result": "APPROVAL_PAY_200_WITH_PASSIVE_CHALLENGE_MARKERS",
+  "http_status": 200,
+  "final_path": "/pay",
+  "transport": "http/1.1",
+  "capture_integrity": "valid_2_of_2",
+  "challenge_markers": [
+    "datadome",
+    "captcha"
+  ],
+  "approval_controls": {
+    "email": true,
+    "create_account": true
+  },
+  "profile_cleanup": "closed_retained",
+  "network_environment_inspected": false,
+  "evidence": [
+    "a third independent SID and randomized fingerprint reached /pay with HTTP 200 over HTTP/1.1",
+    "the document again exposed both the email and Create Account controls and did not enter checkoutweb/genericError",
+    "passive DataDome/CAPTCHA strings caused conservative challenge classification without a terminal challenge document",
+    "the coherent headed iOS runtime and all two captured records verified",
+    "no challenge was solved and no Create Account, signup, phone, OTP, registration, funding, or authorization action occurred"
+  ],
+  "conclusion": "The retained test Profile gate produced three consecutive /pay 200 documents on three fresh SIDs with no HTTP 403 or genericError. Proceed to a newly created Profile using the same randomized iOS policy while keeping BA candidate one selected."
+}
