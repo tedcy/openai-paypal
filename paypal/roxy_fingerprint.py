@@ -641,15 +641,30 @@ def inspect_roxy_runtime_identity(cdp: Any, page: Any, config: RoxyCaptureConfig
         mismatches.append("language")
     if observed["timezone"] != _runtime_timezone_name(config.timezone):
         mismatches.append("timezone")
-    if observed["outer_width"] != config.open_width:
+    outer_width_frame_delta = bool(
+        not config.headless
+        and observed["outer_width"] > 0
+        and 0 <= observed["outer_width"] - config.open_width <= 2
+    )
+    if observed["outer_width"] != config.open_width and not outer_width_frame_delta:
         mismatches.append("outer_width")
     screen_height = int(screen.get("height") or 0)
     outer_height_clamped_to_screen = bool(
-        screen_height > 0
+        not config.headless
+        and screen_height > 0
         and config.open_height > screen_height
-        and observed["outer_height"] == screen_height
+        and 0 <= observed["outer_height"] - screen_height <= 2
     )
-    if observed["outer_height"] != config.open_height and not outer_height_clamped_to_screen:
+    outer_height_frame_delta = bool(
+        not config.headless
+        and observed["outer_height"] > 0
+        and 0 <= observed["outer_height"] - config.open_height <= 2
+    )
+    if (
+        observed["outer_height"] != config.open_height
+        and not outer_height_clamped_to_screen
+        and not outer_height_frame_delta
+    ):
         mismatches.append("outer_height")
     if observed["headless_ua"]:
         mismatches.append("headless_ua")
@@ -658,7 +673,15 @@ def inspect_roxy_runtime_identity(cdp: Any, page: Any, config: RoxyCaptureConfig
         "policy": asdict(ROXY_FINGERPRINT_POLICY),
         "observed": observed,
         "mismatches": mismatches,
-        "normalizations": ["outer_height_clamped_to_screen"] if outer_height_clamped_to_screen else [],
+        "normalizations": [
+            name
+            for name, enabled in (
+                ("outer_width_window_frame", outer_width_frame_delta and observed["outer_width"] != config.open_width),
+                ("outer_height_clamped_to_screen", outer_height_clamped_to_screen),
+                ("outer_height_window_frame", outer_height_frame_delta and observed["outer_height"] != config.open_height),
+            )
+            if enabled
+        ],
         "screen": screen,
     }
 
