@@ -1,0 +1,26 @@
+{
+  "round": 67,
+  "mode": "handoff",
+  "control": "first fresh-session paused signup handoff using Chrome 136 HTTP/1.1",
+  "ba_hash": "15e96bc757b6d93f",
+  "proxy_hash": "0c480e094335ff7d",
+  "profile_hash": "1e37282ff2825807",
+  "profile_source": "created_randomized_ios",
+  "result": "PAY_CREATE_ACCOUNT_LOCALIZATION_TIMEOUT_BEFORE_HANDOFF",
+  "http_status": 0,
+  "browser_approval_status": 200,
+  "ui_generation": "unknown",
+  "protocol_request_sent": false,
+  "transport": "not_reached",
+  "capture_integrity": "valid_790_of_790",
+  "profile_cleanup": "closed_retained_pending_exact_cleanup",
+  "network_environment_inspected": false,
+  "evidence": [
+    "approval reached /pay with HTTP 200 over HTTP/1.1 in a coherent randomized iOS runtime",
+    "the page rendered Chinese labels, including the Create Account control, while the automation searched only English text",
+    "the stable DOM exposed form[data-testid=create-account-form] with a submit button independent of locale",
+    "no checkoutweb/signup request was paused and no Python protocol request was sent",
+    "all 790 capture records verified and no phone, OTP, registration, funding, or authorization action occurred"
+  ],
+  "conclusion": "Select the Create Account form through its stable data-testid/button structure before using localized text fallbacks. Keep BA candidate one selected and repeat handoff with a new SID."
+}
