@@ -1,0 +1,44 @@
+{
+  "round": 62,
+  "mode": "approval-control",
+  "control": "newly created randomized iOS Profile after the retained test Profile passed its three-sample gate",
+  "ba_hash": "15e96bc757b6d93f",
+  "proxy_hash": "c092608b5f045adc",
+  "profile_hash": "f1762ca6864d35c5",
+  "profile_source": "created_randomized_control",
+  "proxy_cursor": {
+    "selected": 30,
+    "next": 0,
+    "quarantined": true
+  },
+  "fingerprint_runtime": {
+    "verified": true,
+    "browser": "Chrome 136.0.7103.49",
+    "user_agent": "iOS 18.2 CriOS 136.0.7103.88",
+    "platform": "iPhone",
+    "language": "bs-BA",
+    "headless": false
+  },
+  "result": "CREATED_PROFILE_APPROVAL_PAY_200_WITH_PASSIVE_CAPTCHA_MARKER",
+  "http_status": 200,
+  "final_path": "/pay",
+  "transport": "http/1.1",
+  "capture_integrity": "valid_2_of_2",
+  "challenge_markers": [
+    "captcha"
+  ],
+  "approval_controls": {
+    "email": true,
+    "create_account": true
+  },
+  "profile_cleanup": "closed_retained",
+  "network_environment_inspected": false,
+  "evidence": [
+    "a newly created Profile using the same randomized iOS 18 / Chrome 136 / WebRTC replacement policy reached /pay with HTTP 200 over HTTP/1.1",
+    "the document exposed both the email and Create Account controls and did not enter checkoutweb/genericError",
+    "the generated runtime selected iOS 18.2, CriOS 136.0.7103.88 and bs-BA while remaining internally coherent",
+    "only a passive CAPTCHA string caused conservative challenge classification; no terminal challenge document was observed",
+    "all two capture records verified and no Create Account, signup, phone, OTP, registration, funding, or authorization action occurred"
+  ],
+  "conclusion": "The automatic Profile creation path reproduces the retained test Profile's non-403 /pay result. The next bounded step is a fresh reference run that may activate Create Account but must still stop before phone or any signup submission."
+}
