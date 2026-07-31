@@ -1,0 +1,25 @@
+{
+  "round": 74,
+  "mode": "handoff",
+  "control": "current active BA with the extended navigation budget, reserving a fresh SID before creating a new randomized iOS Profile",
+  "ba_hash": "86d9fa61df4d6bcb",
+  "proxy_hash": "1c3e0e7458dffbf2",
+  "profile_hash": "e3b0c44298fc1c14",
+  "result": "ROXY_WINDOW_QUOTA_BEFORE_PROFILE_CREATE",
+  "http_status": 0,
+  "approval_document_status": 0,
+  "request_events": 0,
+  "response_events": 0,
+  "signup_request_paused_count": 0,
+  "protocol_request_sent": false,
+  "profile_created": false,
+  "profile_cleanup": "not_applicable",
+  "network_environment_inspected": false,
+  "evidence": [
+    "the Local API rejected /browser/create with its window-quota error before returning a Profile ID",
+    "the reserved proxy cursor advanced for the attempted fresh Profile, but no target request was sent",
+    "there is no evidence about the BA, proxy response, browser navigation, or protocol handoff in this round",
+    "the most recent retained lab Profile ID remains available in the prior local capture for exact cleanup without listing Profiles"
+  ],
+  "conclusion": "This is a local Roxy capacity failure, not a CTF or BA result. Close and delete only the exact retained Profile owned by Round 73, then retry the unchanged handoff with the next fresh SID."
+}
