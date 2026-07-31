@@ -421,6 +421,53 @@ def _profile_finger_info(detail: Mapping[str, Any]) -> dict[str, Any]:
     return dict(value) if isinstance(value, dict) else {}
 
 
+def _randomize_response_finger_info(payload: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Extract generated fingerprint fields from known Roxy random_env shapes."""
+    if not isinstance(payload, Mapping):
+        return {}
+    candidates: list[Any] = [payload, payload.get("data")]
+    data = payload.get("data")
+    if isinstance(data, Mapping):
+        candidates.extend(
+            [
+                data.get("row"),
+                data.get("profile"),
+                data.get("fingerInfo"),
+            ]
+        )
+        for key in ("rows", "list", "records"):
+            rows = data.get(key)
+            if isinstance(rows, list):
+                candidates.extend(rows[:1])
+    for candidate in candidates:
+        if not isinstance(candidate, Mapping):
+            continue
+        direct = _profile_finger_info(candidate)
+        if direct:
+            return direct
+        if any(
+            key in candidate
+            for key in (
+                "canvas",
+                "audioContext",
+                "webGL",
+                "webRTC",
+                "hardwareConcurrent",
+                "deviceMemory",
+            )
+        ):
+            return dict(candidate)
+    return {}
+
+
+def _fresh_roxy_host_identity() -> tuple[str, str]:
+    """Return a fresh Roxy-style device name and locally administered MAC."""
+    device_name = f"DESKTOP-{uuid.uuid4().hex[:8].upper()}"
+    mac = bytearray(uuid.uuid4().bytes[:6])
+    mac[0] = (mac[0] & 0xFC) | 0x02
+    return device_name, "-".join(f"{value:02X}" for value in mac)
+
+
 def _roxy_finger_info_template(
     config: RoxyCaptureConfig,
     startup_args: Iterable[str],
@@ -494,10 +541,97 @@ def _roxy_finger_info_template(
 
 def _normalized_major(value: object) -> str:
     text = str(value or "")
-    match = re.search(r"(?:Chrome|Chromium|RoxyChrome)/(\d+)", text, re.I)
+    match = re.search(r"(?:Chrome|Chromium|RoxyChrome|CriOS)/(\d+)", text, re.I)
     if not match:
         match = re.search(r"(?:^|/)(\d+)", text)
     return match.group(1) if match else ""
+
+
+def _randomized_profile_policy_verification(
+    detail: Mapping[str, Any],
+    config: RoxyCaptureConfig,
+    *,
+    randomize_acknowledged: bool,
+    mdf_acknowledged: bool,
+    finger_info_merge_source: str,
+    device_name: str,
+    mac_addr: str,
+) -> dict[str, Any]:
+    """Verify fixed identity boundaries without rejecting randomized noise."""
+    finger_info = _profile_finger_info(detail)
+    observed = {
+        "core_type": str(detail.get("coreType") or detail.get("core_type") or ""),
+        "core_version": str(detail.get("coreVersion") or detail.get("core_version") or ""),
+        "os_name": str(detail.get("os") or ""),
+        "os_version": str(detail.get("osVersion") or detail.get("os_version") or ""),
+        "web_rtc_mode": finger_info.get("webRTC"),
+        "random_fingerprint": finger_info.get("randomFingerprint"),
+    }
+    mismatches: list[str] = []
+    unobservable: list[str] = []
+    if observed["core_type"]:
+        if observed["core_type"].lower() != config.core_type.lower():
+            mismatches.append("core_type")
+    else:
+        unobservable.append("core_type")
+    if observed["core_version"]:
+        if _normalized_major(observed["core_version"]) != _normalized_major(config.core_version):
+            mismatches.append("core_version")
+    else:
+        unobservable.append("core_version")
+    if observed["os_name"]:
+        if observed["os_name"].lower() != config.os_name.lower():
+            mismatches.append("os_name")
+    else:
+        unobservable.append("os_name")
+    if observed["os_version"]:
+        if _normalized_major(observed["os_version"]) != _normalized_major(config.os_version):
+            mismatches.append("os_version")
+    else:
+        unobservable.append("os_version")
+    if observed["web_rtc_mode"] is None:
+        unobservable.append("web_rtc_mode")
+    elif observed["web_rtc_mode"] != config.web_rtc_mode:
+        mismatches.append("web_rtc_mode")
+    if observed["random_fingerprint"] is None:
+        unobservable.append("random_fingerprint")
+    elif observed["random_fingerprint"] is not False:
+        mismatches.append("random_fingerprint")
+    fixed_keys = {
+        "webRTC",
+        "randomFingerprint",
+        "syncTab",
+        "syncCookie",
+        "syncPassword",
+        "syncIndexedDb",
+        "syncLocalStorage",
+        "clearCacheFile",
+        "clearCookie",
+        "clearLocalStorage",
+        "forbidSavePassword",
+        "startupParam",
+    }
+    return {
+        "verified": bool(randomize_acknowledged and mdf_acknowledged and not mismatches),
+        "randomize_acknowledged": bool(randomize_acknowledged),
+        "mdf_acknowledged": bool(mdf_acknowledged),
+        "finger_info_merge_source": finger_info_merge_source,
+        "detail_finger_info_present": bool(finger_info),
+        "policy": {
+            "name": "ios18-chrome136-randomized" if config.os_name.lower() == "ios" else "randomized",
+            "core_type": config.core_type,
+            "core_version": config.core_version,
+            "os_name": config.os_name,
+            "os_version": config.os_version,
+            "web_rtc_mode": config.web_rtc_mode,
+        },
+        "observed": observed,
+        "mismatches": mismatches,
+        "unobservable": unobservable,
+        "randomized_fields_observed": sorted(set(finger_info) - fixed_keys),
+        "device_name_hash": hashlib.sha256(device_name.encode("utf-8")).hexdigest()[:16],
+        "mac_hash": hashlib.sha256(mac_addr.encode("utf-8")).hexdigest()[:16],
+    }
 
 
 def _profile_policy_verification(
@@ -624,7 +758,13 @@ def _runtime_timezone_name(value: str) -> str:
     return parts[1] if len(parts) == 2 else parts[0]
 
 
-def inspect_roxy_runtime_identity(cdp: Any, page: Any, config: RoxyCaptureConfig) -> dict[str, Any]:
+def inspect_roxy_runtime_identity(
+    cdp: Any,
+    page: Any,
+    config: RoxyCaptureConfig,
+    *,
+    preserve_randomized: bool = False,
+) -> dict[str, Any]:
     """Verify non-network runtime identity fields without WebRTC/IP probing."""
     browser_version = dict(cdp.send("Browser.getVersion") or {})
     runtime = dict(
@@ -704,12 +844,18 @@ def inspect_roxy_runtime_identity(cdp: Any, page: Any, config: RoxyCaptureConfig
     if _normalized_major(user_agent) != config.core_version:
         mismatches.append("user_agent")
     user_agent_lower = user_agent.lower()
-    if config.os_name.lower() == "macos" and not (
-        "macintosh" in user_agent_lower and "mac os x" in user_agent_lower
-    ):
-        mismatches.append("user_agent_os")
-    if "mac" not in platform.lower():
-        mismatches.append("platform")
+    os_name = config.os_name.lower()
+    if os_name == "macos":
+        if not ("macintosh" in user_agent_lower and "mac os x" in user_agent_lower):
+            mismatches.append("user_agent_os")
+        if "mac" not in platform.lower():
+            mismatches.append("platform")
+    elif os_name == "ios":
+        ios_ua_markers = ("iphone", "ipad", "ipod", "cpu os", "cpu iphone os")
+        if not any(marker in user_agent_lower for marker in ios_ua_markers):
+            mismatches.append("user_agent_os")
+        if not any(marker in platform.lower() for marker in ("iphone", "ipad", "ipod", "mac")):
+            mismatches.append("platform")
     if config.follow_ip:
         if not observed["language"]:
             mismatches.append("language")
@@ -720,11 +866,11 @@ def inspect_roxy_runtime_identity(cdp: Any, page: Any, config: RoxyCaptureConfig
             mismatches.append("language")
         if observed["timezone"] != _runtime_timezone_name(config.timezone):
             mismatches.append("timezone")
-    if observed["hardware_concurrency"] != config.hardware_concurrency:
+    if not preserve_randomized and observed["hardware_concurrency"] != config.hardware_concurrency:
         mismatches.append("hardware_concurrency")
-    if observed["device_memory"] != config.device_memory:
+    if not preserve_randomized and observed["device_memory"] != config.device_memory:
         mismatches.append("device_memory")
-    if config.do_not_track:
+    if not preserve_randomized and config.do_not_track:
         if not observed["do_not_track"]:
             # The first Roxy Page can still be a chrome:// or
             # chrome-untrusted:// new-tab document. DNT is not exposed there
@@ -739,6 +885,8 @@ def inspect_roxy_runtime_identity(cdp: Any, page: Any, config: RoxyCaptureConfig
         2: "denied",
     }.get(config.geolocation_mode, "")
     if (
+        not preserve_randomized
+        and
         expected_geolocation_permission
         and observed["geolocation_permission"] != expected_geolocation_permission
     ):
@@ -748,7 +896,11 @@ def inspect_roxy_runtime_identity(cdp: Any, page: Any, config: RoxyCaptureConfig
         and observed["outer_width"] > 0
         and 0 <= observed["outer_width"] - config.open_width <= 2
     )
-    if observed["outer_width"] != config.open_width and not outer_width_frame_delta:
+    if (
+        not preserve_randomized
+        and observed["outer_width"] != config.open_width
+        and not outer_width_frame_delta
+    ):
         mismatches.append("outer_width")
     screen_height = int(screen.get("height") or 0)
     outer_height_clamped_to_screen = bool(
@@ -763,7 +915,8 @@ def inspect_roxy_runtime_identity(cdp: Any, page: Any, config: RoxyCaptureConfig
         and 0 <= observed["outer_height"] - config.open_height <= 2
     )
     if (
-        observed["outer_height"] != config.open_height
+        not preserve_randomized
+        and observed["outer_height"] != config.open_height
         and not outer_height_clamped_to_screen
         and not outer_height_frame_delta
     ):
@@ -772,7 +925,13 @@ def inspect_roxy_runtime_identity(cdp: Any, page: Any, config: RoxyCaptureConfig
         mismatches.append("headless_ua")
     return {
         "verified": not mismatches,
-        "policy": asdict(ROXY_FINGERPRINT_POLICY),
+        "policy": {
+            "mode": "randomized" if preserve_randomized else "fixed",
+            "core_type": config.core_type,
+            "core_version": config.core_version,
+            "os_name": config.os_name,
+            "os_version": config.os_version,
+        },
         "observed": observed,
         "mismatches": mismatches,
         "unobservable": unobservable,
@@ -1084,8 +1243,20 @@ class RoxyApiClient:
             raise RoxyFingerprintError("Roxy /browser/create 未返回 dirId")
         return dir_id
 
-    def randomize_profile(self, workspace_id: int, dir_id: str) -> None:
-        self.request("POST", "/browser/random_env", json={"workspaceId": workspace_id, "dirId": dir_id})
+    def randomize_profile(self, workspace_id: int, dir_id: str) -> dict[str, Any]:
+        return self.request(
+            "POST",
+            "/browser/random_env",
+            json={"workspaceId": workspace_id, "dirId": dir_id},
+        )
+
+    def clear_profile_cache(self, workspace_id: int, dir_id: str) -> dict[str, Any]:
+        """Clear only the explicitly owned Profile through Roxy's native API."""
+        return self.request(
+            "POST",
+            "/browser/clear_local_cache",
+            json={"workspaceId": workspace_id, "dirIds": [dir_id], "type": "all"},
+        )
 
     @staticmethod
     def _profile_detail_row(payload: Mapping[str, Any], dir_id: str) -> dict[str, Any]:
@@ -1133,15 +1304,27 @@ class RoxyApiClient:
         self,
         workspace_id: int,
         dir_id: str,
+        *,
+        preserve_randomized: bool = False,
+        refresh_host_identity: bool = False,
     ) -> dict[str, Any]:
         """Randomize Roxy noise fields, then freeze the shared identity policy."""
-        self.randomize_profile(workspace_id, dir_id)
+        randomize_response = self.randomize_profile(workspace_id, dir_id)
         before = self.get_profile_detail(workspace_id, dir_id)
         if not before:
             raise RoxyFingerprintError("ROXY_PROFILE_DETAIL_MISSING")
-        finger_info = _profile_finger_info(before)
-        finger_info_merge_source = "detail"
-        if not finger_info:
+        response_finger_info = _randomize_response_finger_info(randomize_response)
+        detail_finger_info = _profile_finger_info(before)
+        # Some Roxy builds return only the fields changed by ``random_env``
+        # while exposing the rest of the generated identity through detail.
+        # Preserve that complete randomized identity and let the explicit
+        # random_env values win when the two sources overlap.
+        finger_info = dict(detail_finger_info)
+        finger_info.update(response_finger_info)
+        finger_info_merge_source = (
+            "random_env" if response_finger_info else "detail" if detail_finger_info else "unobservable_preserved"
+        )
+        if not finger_info and not preserve_randomized:
             finger_info = _roxy_finger_info_template(
                 self.config,
                 _roxy_profile_startup_args(
@@ -1152,8 +1335,38 @@ class RoxyApiClient:
                 random_fingerprint=True,
             )
             finger_info_merge_source = "create_template"
-        finger_info.update(
-            {
+        if preserve_randomized:
+            if finger_info:
+                finger_info.update(
+                    {
+                        "isLanguageBaseIp": self.config.follow_ip,
+                        "isDisplayLanguageBaseIp": self.config.follow_ip,
+                        "isTimeZone": self.config.follow_ip,
+                        "position": self.config.geolocation_mode,
+                        "isPositionBaseIp": self.config.follow_ip,
+                        "webRTC": self.config.web_rtc_mode,
+                        "randomFingerprint": False,
+                        "syncTab": False,
+                        "syncCookie": False,
+                        "syncPassword": False,
+                        "syncIndexedDb": False,
+                        "syncLocalStorage": False,
+                        "clearCacheFile": True,
+                        "clearCookie": True,
+                        "clearLocalStorage": True,
+                        "forbidSavePassword": True,
+                        "startupParam": ";".join(
+                            _roxy_profile_startup_args(
+                                self.config.proxy_url,
+                                open_width=self.config.open_width,
+                                open_height=self.config.open_height,
+                            )
+                        ),
+                    }
+                )
+        else:
+            finger_info.update(
+                {
                 "isLanguageBaseIp": self.config.follow_ip,
                 "language": self.config.language,
                 "isDisplayLanguageBaseIp": self.config.follow_ip,
@@ -1186,8 +1399,8 @@ class RoxyApiClient:
                 "clearCookie": True,
                 "clearLocalStorage": True,
                 "forbidSavePassword": True,
-            }
-        )
+                }
+            )
         values: dict[str, Any] = {
             "coreType": self.config.core_type,
             "coreVersion": self.config.core_version,
@@ -1196,21 +1409,45 @@ class RoxyApiClient:
             "defaultOpenUrl": ["about:blank"],
             "cookie": [],
             "proxyInfo": _roxy_proxy_info(self.config.proxy_url),
-            "fingerInfo": finger_info,
         }
+        if finger_info:
+            values["fingerInfo"] = finger_info
+        device_name = ""
+        mac_addr = ""
+        if refresh_host_identity:
+            device_name, mac_addr = _fresh_roxy_host_identity()
+            values.update(
+                {
+                    "deviceName": device_name,
+                    "macAddr": mac_addr,
+                    "deviceNameSwitch": True,
+                    "macInfo": True,
+                }
+            )
         for key in ("windowName", "windowRemark", "searchEngine"):
             if key in before:
                 values[key] = before[key]
-        if before.get("userAgent"):
+        if before.get("userAgent") and not preserve_randomized:
             values["userAgent"] = before["userAgent"]
-        self.modify_profile(workspace_id, dir_id, values)
+        modify_response = self.modify_profile(workspace_id, dir_id, values)
         after = self.get_profile_detail(workspace_id, dir_id)
-        verification = _profile_policy_verification(
-            after,
-            self.config,
-            mdf_acknowledged=True,
-        )
-        verification["finger_info_merge_source"] = finger_info_merge_source
+        if preserve_randomized:
+            verification = _randomized_profile_policy_verification(
+                after,
+                self.config,
+                randomize_acknowledged=randomize_response is not None,
+                mdf_acknowledged=modify_response is not None,
+                finger_info_merge_source=finger_info_merge_source,
+                device_name=device_name,
+                mac_addr=mac_addr,
+            )
+        else:
+            verification = _profile_policy_verification(
+                after,
+                self.config,
+                mdf_acknowledged=True,
+            )
+            verification["finger_info_merge_source"] = finger_info_merge_source
         logger.info(
             "Roxy profile policy verification dir_id={} verified={} mismatches={} "
             "finger_info_merge_source={} generated_fields={}",
@@ -1218,7 +1455,7 @@ class RoxyApiClient:
             verification["verified"],
             verification["mismatches"],
             finger_info_merge_source,
-            verification["generated_fields"],
+            verification.get("generated_fields", verification.get("randomized_fields_observed", [])),
         )
         return {"before": before, "after": after, "verification": verification}
 

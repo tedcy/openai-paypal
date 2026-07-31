@@ -1,3 +1,4 @@
+import inspect
 import json
 import threading
 from pathlib import Path
@@ -7,17 +8,22 @@ import pytest
 import httpx
 
 from paypal.signup_lab import (
+    ApprovalCdpObserver,
     BrowserSignupContext,
     CdpCapture,
+    RoxyApprovalControl,
     RoxySignupLab,
     SignupLabInputs,
     _approval_document_has_status,
     _configure_roxy_for_signup_lab,
     _hash,
+    _safe_existing_profile_detail,
     audit_jsonl_capture,
+    classify_approval_document,
     classify_signup_document,
     classify_signup_ui,
     clear_existing_profile_state,
+    run_approval_control_from_file,
     run_signup_lab_from_file,
 )
 from paypal.proxy import ProxyEntry
@@ -65,7 +71,7 @@ def test_signup_lab_inputs_route_bosnia_phone_and_proxy(tmp_path) -> None:
         json.dumps(
             {
                 "ba_tokens": ["BA-12345678ABCDEF"],
-                "phone": "+387644518746",
+                "phone": "+38761123456",
                 "proxies": ["proxy.test:3010:ba-user:ba-password"],
             }
         ),
@@ -92,7 +98,7 @@ def test_manual_navigation_requires_explicit_existing_profile(tmp_path) -> None:
         RoxySignupLab(
             mode="reference",
             ba_token="BA-12345678ABCDEF",
-            phone="+387644518746",
+            phone="+38761123456",
             proxy_line="proxy.test:3010:user:password",
             capture_root=tmp_path / "capture",
             manual_navigation=True,
@@ -109,7 +115,7 @@ def test_signup_lab_reserves_a_new_non_quarantined_proxy_for_each_profile(tmp_pa
         json.dumps(
             {
                 "ba_tokens": ["BA-12345678ABCDEF"],
-                "phone": "+387644518746",
+                "phone": "+38761123456",
                 "proxies": [first, second, third],
                 "failed_proxy_hashes": [first_hash],
                 "next_proxy_index": 0,
@@ -139,7 +145,7 @@ def test_signup_lab_quarantines_approval_403_proxy_without_logging_credentials(
         json.dumps(
             {
                 "ba_tokens": ["BA-12345678ABCDEF"],
-                "phone": "+387644518746",
+                "phone": "+38761123456",
                 "proxies": [first, second],
                 "next_proxy_index": 0,
             }
@@ -183,7 +189,7 @@ def test_cold_protocol_does_not_advance_proxy_cursor(tmp_path, monkeypatch) -> N
         json.dumps(
             {
                 "ba_tokens": ["BA-12345678ABCDEF"],
-                "phone": "+387644518746",
+                "phone": "+38761123456",
                 "proxies": [
                     "proxy-a.test:3010:user:password-a",
                     "proxy-b.test:3010:user:password-b",
@@ -217,7 +223,7 @@ def test_existing_profile_control_does_not_reserve_or_quarantine_proxy(
         json.dumps(
             {
                 "ba_tokens": ["BA-12345678ABCDEF"],
-                "phone": "+387644518746",
+                "phone": "+38761123456",
                 "proxies": [
                     "proxy-a.test:3010:user:password-a",
                     "proxy-b.test:3010:user:password-b",
@@ -921,3 +927,229 @@ def test_pay_stage_uses_exact_application_email_form() -> None:
     assert "pay_form_submitted = True" in pay_block
     assert "#loginButton" not in pay_block
     assert "pay_create_account_view_selected" in pay_block
+
+
+@pytest.mark.parametrize(
+    ("status", "body", "url", "expected"),
+    [
+        (
+            200,
+            "<html><button>Create an account</button></html>",
+            "https://www.paypal.com/agreements/approve?ba_token=BA-REDACTED",
+            "approval_ready",
+        ),
+        (
+            403,
+            "<html><button>Create an account</button></html>",
+            "https://www.paypal.com/agreements/approve?ba_token=BA-REDACTED",
+            "approval_challenged",
+        ),
+        (
+            200,
+            "<html>Billing agreement has expired</html>",
+            "https://www.paypal.com/agreements/approve?ba_token=BA-REDACTED",
+            "approval_business_error",
+        ),
+        (
+            0,
+            "",
+            "https://www.paypal.com/agreements/approve?ba_token=BA-REDACTED",
+            "approval_timeout",
+        ),
+    ],
+)
+def test_approval_control_classifies_only_the_committed_document(
+    status: int,
+    body: str,
+    url: str,
+    expected: str,
+) -> None:
+    result = classify_approval_document(status, "text/html", body, url)
+
+    assert result["result"] == expected
+    assert result["valid"] is (expected == "approval_ready")
+
+
+def test_approval_cdp_capture_omits_remote_connection_and_secret_values(tmp_path) -> None:
+    class Cdp:
+        def __init__(self):
+            self.handlers = {}
+
+        def send(self, method, params=None):
+            assert method in {"Page.enable", "Network.enable"}
+            return {}
+
+        def on(self, event, callback):
+            self.handlers[event] = callback
+
+    cdp = Cdp()
+    observer = ApprovalCdpObserver(cdp, tmp_path / "browser")
+    observer.start()
+    secret_ba = "BA-SHOULD-NOT-BE-WRITTEN"
+    cdp.handlers["Network.requestWillBeSent"](
+        {
+            "type": "Document",
+            "request": {
+                "method": "GET",
+                "url": (
+                    "https://www.paypal.com/agreements/approve?ba_token="
+                    f"{secret_ba}"
+                ),
+                "headers": {"Cookie": "secret-cookie"},
+            },
+        }
+    )
+    cdp.handlers["Network.responseReceived"](
+        {
+            "type": "Document",
+            "response": {
+                "url": "https://www.paypal.com/agreements/approve",
+                "status": 200,
+                "mimeType": "text/html",
+                "protocol": "http/1.1",
+                "remoteIPAddress": "192.0.2.10",
+                "remotePort": 443,
+            },
+        }
+    )
+
+    audit = observer.close()
+    capture_text = (tmp_path / "browser" / "approval-events.jsonl").read_text(
+        encoding="utf-8"
+    )
+
+    assert audit["valid"] is True
+    assert secret_ba not in capture_text
+    assert "secret-cookie" not in capture_text
+    assert "remoteIPAddress" not in capture_text
+    assert "remotePort" not in capture_text
+    assert "192.0.2.10" not in capture_text
+    assert '"query_keys": ["ba_token"]' in capture_text
+
+
+def test_approval_control_three_round_gate_rotates_sid_and_preserves_test_profile(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    source = tmp_path / "inputs.json"
+    proxies = [
+        "proxy-a.test:3010:user:sid-a",
+        "proxy-b.test:3010:user:sid-b",
+        "proxy-c.test:3010:user:sid-c",
+    ]
+    source.write_text(
+        json.dumps(
+            {
+                "ba_tokens": ["BA-12345678ABCDEF"],
+                "phone": "+38761123456",
+                "proxies": proxies,
+                "next_proxy_index": 0,
+            }
+        ),
+        encoding="utf-8",
+    )
+    observed = []
+
+    def fake_run(self):
+        observed.append(
+            {
+                "profile_id": self.existing_profile_id,
+                "profile_name": self.existing_profile_name,
+                "proxy_hash": _hash(self.proxy_entry.url),
+            }
+        )
+        return {
+            "status": "approval_ready",
+            "profile_cleanup": "closed_retained",
+            "profile_retained": True,
+            "browser_transport": {"main_documents": []},
+        }
+
+    monkeypatch.setattr(RoxyApprovalControl, "run", fake_run)
+
+    result = run_approval_control_from_file(
+        input_file=source,
+        capture_dir=tmp_path / "capture",
+        rounds=3,
+        existing_profile_id="be1f8841bf2beb37d23c1b836784392c",
+        existing_profile_name="test",
+    )
+
+    assert result["status"] == "approval_batch_ready"
+    assert result["approval_ready_count"] == 3
+    assert result["all_ready"] is True
+    assert len({item["proxy_hash"] for item in observed}) == 3
+    assert {item["profile_id"] for item in observed} == {
+        "be1f8841bf2beb37d23c1b836784392c"
+    }
+    assert {item["profile_name"] for item in observed} == {"test"}
+    assert json.loads(source.read_text(encoding="utf-8"))["next_proxy_index"] == 0
+
+
+def test_approval_control_three_round_gate_rejects_one_failed_round(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    source = tmp_path / "inputs.json"
+    source.write_text(
+        json.dumps(
+            {
+                "ba_tokens": ["BA-12345678ABCDEF"],
+                "phone": "+38761123456",
+                "proxies": [
+                    "proxy-a.test:3010:user:sid-a",
+                    "proxy-b.test:3010:user:sid-b",
+                    "proxy-c.test:3010:user:sid-c",
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    statuses = iter(["approval_ready", "approval_challenged", "approval_ready"])
+    monkeypatch.setattr(
+        RoxyApprovalControl,
+        "run",
+        lambda self: {
+            "status": next(statuses),
+            "browser_transport": {"main_documents": []},
+        },
+    )
+
+    result = run_approval_control_from_file(
+        input_file=source,
+        capture_dir=tmp_path / "capture",
+        rounds=3,
+        existing_profile_id="be1f8841bf2beb37d23c1b836784392c",
+        existing_profile_name="test",
+    )
+
+    assert result["status"] == "approval_batch_failed"
+    assert result["approval_ready_count"] == 2
+    assert result["all_ready"] is False
+
+
+def test_approval_control_never_deletes_owned_or_existing_profile() -> None:
+    run_source = inspect.getsource(RoxyApprovalControl.run)
+
+    assert ".delete_profile(" not in run_source
+    assert "client.close_profile(profile_id)" in run_source
+
+
+def test_existing_ios_profile_detail_recognizes_crios_major() -> None:
+    safe = _safe_existing_profile_detail(
+        {
+            "windowName": "test",
+            "coreVersion": "136",
+            "os": "IOS",
+            "osVersion": "18",
+            "userAgent": (
+                "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) "
+                "AppleWebKit/605.1.15 (KHTML, like Gecko) "
+                "CriOS/136.0.7103.93 Mobile/15E148 Safari/604.1"
+            ),
+        },
+        expected_name="test",
+    )
+
+    assert safe["user_agent_major"] == "136"
+    assert safe["expected_name_verified"] is True

@@ -253,6 +253,118 @@ def test_randomize_and_freeze_preserves_roxy_noise_and_reapplies_policy() -> Non
     assert modified["fingerInfo"]["deviceMemory"] == "8"
 
 
+def test_randomized_ios_freeze_preserves_generated_noise_and_refreshes_host_identity() -> None:
+    client = RoxyApiClient.__new__(RoxyApiClient)
+    client.config = RoxyCaptureConfig(
+        api_base="http://127.0.0.1:50000",
+        api_key="",
+        proxy_url="http://user:password@proxy.test:3010",
+        core_type="Chrome",
+        core_version="136",
+        os_name="IOS",
+        os_version="18",
+        web_rtc_mode=0,
+    )
+    generated = {
+        "canvas": {"noise": "new-canvas"},
+        "audioContext": {"noise": "new-audio"},
+        "webGLRender": "Roxy generated GPU",
+        "hardwareConcurrent": "6",
+        "deviceMemory": "4",
+        "webRTC": 2,
+        "randomFingerprint": True,
+    }
+    modified: dict = {}
+    client.randomize_profile = lambda workspace_id, dir_id: {
+        "code": 0,
+        "data": {"fingerInfo": generated},
+    }
+
+    def detail(workspace_id, dir_id):
+        if not modified:
+            return {
+                "dirId": dir_id,
+                "coreVersion": "136",
+                "os": "IOS",
+                "osVersion": "18",
+                "userAgent": "stale desktop user agent",
+            }
+        return {
+            "dirId": dir_id,
+            "coreType": modified["coreType"],
+            "coreVersion": modified["coreVersion"],
+            "os": modified["os"],
+            "osVersion": modified["osVersion"],
+            "fingerInfo": modified["fingerInfo"],
+        }
+
+    client.get_profile_detail = detail
+    client.modify_profile = (
+        lambda workspace_id, dir_id, values: modified.update(values) or {"code": 0}
+    )
+
+    result = client.randomize_and_freeze_profile(
+        123,
+        "test-profile",
+        preserve_randomized=True,
+        refresh_host_identity=True,
+    )
+
+    assert modified["coreType"] == "Chrome"
+    assert modified["coreVersion"] == "136"
+    assert modified["os"] == "IOS"
+    assert modified["osVersion"] == "18"
+    assert "userAgent" not in modified
+    assert modified["fingerInfo"]["canvas"] == {"noise": "new-canvas"}
+    assert modified["fingerInfo"]["audioContext"] == {"noise": "new-audio"}
+    assert modified["fingerInfo"]["webGLRender"] == "Roxy generated GPU"
+    assert modified["fingerInfo"]["hardwareConcurrent"] == "6"
+    assert modified["fingerInfo"]["deviceMemory"] == "4"
+    assert modified["fingerInfo"]["webRTC"] == 0
+    assert modified["fingerInfo"]["randomFingerprint"] is False
+    assert modified["deviceName"].startswith("DESKTOP-")
+    assert len(modified["macAddr"].split("-")) == 6
+    assert result["verification"]["verified"] is True
+    assert result["verification"]["finger_info_merge_source"] == "random_env"
+    assert result["verification"]["device_name_hash"]
+    assert result["verification"]["mac_hash"]
+
+
+def test_randomized_freeze_does_not_replace_unobservable_noise_with_template() -> None:
+    client = RoxyApiClient.__new__(RoxyApiClient)
+    client.config = RoxyCaptureConfig(
+        api_base="http://127.0.0.1:50000",
+        api_key="",
+        proxy_url="http://user:password@proxy.test:3010",
+        core_version="136",
+        os_name="IOS",
+        os_version="18",
+    )
+    modified: dict = {}
+    client.randomize_profile = lambda workspace_id, dir_id: {"code": 0, "data": {}}
+    client.get_profile_detail = lambda workspace_id, dir_id: {
+        "dirId": dir_id,
+        "coreVersion": "136",
+        "os": "IOS",
+        "osVersion": "18",
+    }
+    client.modify_profile = (
+        lambda workspace_id, dir_id, values: modified.update(values) or {"code": 0}
+    )
+
+    result = client.randomize_and_freeze_profile(
+        123,
+        "test-profile",
+        preserve_randomized=True,
+        refresh_host_identity=True,
+    )
+
+    assert "fingerInfo" not in modified
+    assert result["verification"]["verified"] is True
+    assert result["verification"]["finger_info_merge_source"] == "unobservable_preserved"
+    assert "web_rtc_mode" in result["verification"]["unobservable"]
+
+
 def test_roxy_v4_summary_detail_uses_visible_and_acknowledged_policy_evidence() -> None:
     client = RoxyApiClient.__new__(RoxyApiClient)
     client.config = RoxyCaptureConfig(
@@ -402,6 +514,81 @@ def test_runtime_identity_verification_uses_cdp_without_webrtc_probe() -> None:
     assert verification["verified"] is True
     assert verification["mismatches"] == []
     assert verification["observed"]["headless_ua"] is False
+
+
+def test_runtime_identity_accepts_randomized_ios_chrome136_without_fixed_hardware() -> None:
+    config = RoxyCaptureConfig(
+        api_base="http://127.0.0.1:50000",
+        api_key="",
+        core_version="136",
+        os_name="IOS",
+        os_version="18",
+        language="en-BA",
+        timezone="GMT+02:00 Europe/Sarajevo",
+    )
+
+    class Cdp:
+        def send(self, method):
+            assert method == "Browser.getVersion"
+            return {"product": "Chrome/136.0.7103.93", "protocolVersion": "1.3"}
+
+    class Page:
+        def evaluate(self, script):
+            assert "RTCPeerConnection" not in script
+            assert "candidate" not in script.lower()
+            return {
+                **_aligned_runtime_fields(),
+                "hardwareConcurrency": 6,
+                "deviceMemory": 4,
+                "doNotTrack": "",
+                "geolocationPermission": "prompt",
+                "userAgent": (
+                    "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) "
+                    "AppleWebKit/605.1.15 (KHTML, like Gecko) "
+                    "CriOS/136.0.7103.93 Mobile/15E148 Safari/604.1"
+                ),
+                "platform": "iPhone",
+                "language": "en-BA",
+                "languages": ["en-BA", "en"],
+                "timezone": "Europe/Sarajevo",
+                "screen": {"width": 430, "height": 932},
+                "window": {"outerWidth": 430, "outerHeight": 932},
+            }
+
+    verification = inspect_roxy_runtime_identity(
+        Cdp(),
+        Page(),
+        config,
+        preserve_randomized=True,
+    )
+
+    assert verification["verified"] is True
+    assert verification["mismatches"] == []
+    assert verification["policy"]["mode"] == "randomized"
+
+
+def test_clear_profile_cache_targets_only_the_explicit_profile() -> None:
+    client = RoxyApiClient.__new__(RoxyApiClient)
+    calls = []
+    client.request = lambda method, path, **kwargs: calls.append(
+        (method, path, kwargs)
+    ) or {"code": 0}
+
+    client.clear_profile_cache(123, "owned-profile")
+
+    assert calls == [
+        (
+            "POST",
+            "/browser/clear_local_cache",
+            {
+                "json": {
+                    "workspaceId": 123,
+                    "dirIds": ["owned-profile"],
+                    "type": "all",
+                }
+            },
+        )
+    ]
 
 
 def test_runtime_identity_treats_internal_page_dnt_as_unobservable() -> None:
@@ -605,3 +792,69 @@ def test_runtime_identity_rejects_unexplained_outer_height_mismatch() -> None:
     assert verification["verified"] is False
     assert verification["mismatches"] == ["outer_height"]
     assert verification["normalizations"] == []
+
+
+def test_randomized_freeze_merges_partial_random_env_over_detail_noise() -> None:
+    client = RoxyApiClient.__new__(RoxyApiClient)
+    client.config = RoxyCaptureConfig(
+        api_base="http://127.0.0.1:50000",
+        api_key="",
+        proxy_url="http://user:password@proxy.test:3010",
+        core_version="136",
+        os_name="IOS",
+        os_version="18",
+        web_rtc_mode=0,
+    )
+    modified = {}
+    client.randomize_profile = lambda workspace_id, dir_id: {
+        "code": 0,
+        "data": {
+            "fingerInfo": {
+                "audioContext": {"noise": "from-random-env"},
+                "webGLRender": "fresh-renderer",
+            }
+        },
+    }
+
+    def detail(workspace_id, dir_id):
+        if not modified:
+            return {
+                "dirId": dir_id,
+                "coreType": "Chrome",
+                "coreVersion": "136",
+                "os": "IOS",
+                "osVersion": "18",
+                "fingerInfo": {
+                    "canvas": {"noise": "from-detail"},
+                    "audioContext": {"noise": "stale-detail"},
+                    "hardwareConcurrent": "6",
+                },
+            }
+        return {
+            "dirId": dir_id,
+            "coreType": modified["coreType"],
+            "coreVersion": modified["coreVersion"],
+            "os": modified["os"],
+            "osVersion": modified["osVersion"],
+            "fingerInfo": modified["fingerInfo"],
+        }
+
+    client.get_profile_detail = detail
+    client.modify_profile = (
+        lambda workspace_id, dir_id, values: modified.update(values) or {"code": 0}
+    )
+
+    result = client.randomize_and_freeze_profile(
+        123,
+        "test-profile",
+        preserve_randomized=True,
+    )
+
+    assert result["verification"]["verified"] is True
+    assert result["verification"]["finger_info_merge_source"] == "random_env"
+    assert modified["fingerInfo"]["canvas"] == {"noise": "from-detail"}
+    assert modified["fingerInfo"]["audioContext"] == {
+        "noise": "from-random-env"
+    }
+    assert modified["fingerInfo"]["webGLRender"] == "fresh-renderer"
+    assert modified["fingerInfo"]["hardwareConcurrent"] == "6"

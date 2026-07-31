@@ -1302,6 +1302,354 @@ class RoxySignupLab:
         return safe
 
 
+class ApprovalCdpObserver:
+    """Record only approval document evidence; never persist connection IP data."""
+
+    def __init__(self, cdp: Any, root: Path):
+        self.cdp = cdp
+        self.writer = JsonlCaptureWriter(root / "approval-events.jsonl")
+        self.main_documents: list[dict[str, Any]] = []
+
+    @staticmethod
+    def _url_shape(value: object) -> dict[str, Any]:
+        parsed = urllib.parse.urlsplit(str(value or ""))
+        return {
+            "scheme": parsed.scheme,
+            "host": parsed.hostname or "",
+            "path": parsed.path or "/",
+            "query_keys": sorted(urllib.parse.parse_qs(parsed.query, keep_blank_values=True)),
+        }
+
+    def _request(self, event: Mapping[str, Any]) -> None:
+        if str(event.get("type") or "") != "Document":
+            return
+        request = event.get("request")
+        request = dict(request) if isinstance(request, Mapping) else {}
+        row = {
+            "event_kind": "requestWillBeSent",
+            "resource_type": "Document",
+            "method": str(request.get("method") or ""),
+            **self._url_shape(request.get("url")),
+        }
+        redirect = event.get("redirectResponse")
+        if isinstance(redirect, Mapping):
+            row["redirect_status"] = int(redirect.get("status") or 0)
+            row["redirect_from"] = self._url_shape(redirect.get("url"))
+        self.writer.append(row)
+
+    def _response(self, event: Mapping[str, Any]) -> None:
+        if str(event.get("type") or "") != "Document":
+            return
+        response = event.get("response")
+        response = dict(response) if isinstance(response, Mapping) else {}
+        document = {
+            "event_kind": "responseReceived",
+            "resource_type": "Document",
+            "status": int(response.get("status") or 0),
+            "mime_type": str(response.get("mimeType") or ""),
+            "protocol": str(response.get("protocol") or ""),
+            **self._url_shape(response.get("url")),
+        }
+        self.main_documents.append(dict(document))
+        self.writer.append(document)
+
+    def _failed(self, event: Mapping[str, Any]) -> None:
+        if str(event.get("type") or "") != "Document":
+            return
+        self.writer.append(
+            {
+                "event_kind": "loadingFailed",
+                "resource_type": "Document",
+                "error_text": str(event.get("errorText") or ""),
+                "canceled": bool(event.get("canceled")),
+            }
+        )
+
+    def start(self) -> None:
+        self.cdp.send("Page.enable")
+        self.cdp.send("Network.enable")
+        self.cdp.on("Network.requestWillBeSent", self._request)
+        self.cdp.on("Network.responseReceived", self._response)
+        self.cdp.on("Network.loadingFailed", self._failed)
+
+    def close(self) -> dict[str, Any]:
+        return self.writer.close()
+
+    def summary(self) -> dict[str, Any]:
+        return {"main_documents": list(self.main_documents)}
+
+
+class RoxyApprovalControl:
+    """Approval-only iOS Roxy control that never submits a page control."""
+
+    def __init__(
+        self,
+        *,
+        ba_token: str,
+        phone: str,
+        proxy_line: str,
+        capture_root: str | Path,
+        existing_profile_id: str = "",
+        existing_profile_name: str = "",
+    ):
+        self.ba_token = parse_ba_token(ba_token)
+        self.phone = str(phone or "").strip()
+        self.country_profile = profile_for_phone(self.phone)
+        self.proxy_entry = ProxyEntry.parse(proxy_line)
+        self.capture_root = Path(capture_root).expanduser().resolve()
+        self.existing_profile_id = str(existing_profile_id or "").strip()
+        self.existing_profile_name = str(existing_profile_name or "").strip()
+        if self.existing_profile_name and not self.existing_profile_id:
+            raise ValueError("existing Profile name requires an explicit Profile ID")
+
+    @staticmethod
+    def _configure_ios_randomized(config: Any) -> None:
+        config.core_type = "Chrome"
+        config.core_version = "136"
+        config.os_name = "IOS"
+        config.os_version = "18"
+        config.web_rtc_mode = 0
+        config.headless = False
+        config.force_open = False
+        config.close_before_open = False
+        config.close_after_capture = False
+        config.delete_after_capture = False
+        config.timeout_seconds = max(
+            float(config.timeout_seconds),
+            _SIGNUP_LAB_ROXY_API_TIMEOUT_SECONDS,
+        )
+
+    @staticmethod
+    def _control_flags(page: Any) -> dict[str, bool]:
+        def present(selector: str) -> bool:
+            try:
+                locator = page.locator(selector)
+                return bool(locator.count() and locator.first.is_visible())
+            except Exception:
+                return False
+
+        has_create_account = False
+        try:
+            locator = page.get_by_text(
+                re.compile(r"create\s+(?:an\s+)?account", re.I),
+                exact=False,
+            )
+            has_create_account = bool(locator.count() and locator.first.is_visible())
+        except Exception:
+            pass
+        return {
+            "has_email_control": present(
+                'input[type="email"], input[autocomplete="email"], input[name*="email" i]'
+            ),
+            "has_create_account_control": has_create_account,
+        }
+
+    def run(self) -> dict[str, Any]:
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError as exc:
+            raise RuntimeError("playwright is required for approval control") from exc
+
+        self.capture_root.mkdir(parents=True, exist_ok=True)
+        profile = browser_profile_for(self.country_profile, BROWSER_PROFILE)
+        config = load_roxy_capture_config(
+            proxy_url=self.proxy_entry.url,
+            browser_profile=profile,
+        )
+        self._configure_ios_randomized(config)
+        if config.workspace_id is None or config.project_id is None:
+            raise RoxyFingerprintError(
+                "approval control requires fixed PAYPAL_ROXY_WORKSPACE_ID and PAYPAL_ROXY_PROJECT_ID"
+            )
+        client = RoxyApiClient(config)
+        profile_id = self.existing_profile_id
+        profile_source = "existing_randomized_control" if profile_id else "created_randomized_control"
+        profile_freeze: dict[str, Any] = {}
+        profile_detail: dict[str, Any] = {}
+        runtime_fingerprint: dict[str, Any] = {}
+        classification: dict[str, Any] = {"result": "approval_unknown", "valid": False}
+        transport: dict[str, Any] = {"main_documents": []}
+        capture_integrity: dict[str, Any] = {}
+        profile_cleanup = "pending"
+        observer: ApprovalCdpObserver | None = None
+        browser = None
+        http_status = 0
+        final_path = ""
+        error_type = ""
+        try:
+            if profile_id:
+                detail = client.get_profile_detail(config.workspace_id, profile_id)
+                if not detail:
+                    raise RuntimeError("ROXY_EXISTING_PROFILE_DETAIL_MISSING")
+                if self.existing_profile_name and str(detail.get("windowName") or "") != self.existing_profile_name:
+                    raise RuntimeError("ROXY_EXISTING_PROFILE_NAME_MISMATCH")
+            else:
+                profile_id = client.create_profile(config.workspace_id, config.project_id)
+            _write_json(
+                self.capture_root / "roxy_profile.json",
+                {
+                    "workspace_id": config.workspace_id,
+                    "project_id": config.project_id,
+                    "profile_id": profile_id,
+                    "profile_source": profile_source,
+                    "cleanup_status": "pending",
+                },
+            )
+            try:
+                client.close_profile(profile_id)
+            except Exception:
+                pass
+            client.clear_profile_cache(config.workspace_id, profile_id)
+            frozen = client.randomize_and_freeze_profile(
+                config.workspace_id,
+                profile_id,
+                preserve_randomized=True,
+                refresh_host_identity=True,
+            )
+            profile_freeze = dict(frozen.get("verification") or {})
+            if not profile_freeze.get("verified"):
+                raise RuntimeError("ROXY_RANDOMIZED_PROFILE_POLICY_MISMATCH")
+            detail = client.get_profile_detail(config.workspace_id, profile_id)
+            profile_detail = _safe_existing_profile_detail(
+                detail,
+                expected_name=self.existing_profile_name,
+            )
+            cdp_info = client.open_existing_profile_preserving_settings(
+                config.workspace_id,
+                profile_id,
+            )
+            endpoint = _connect_over_cdp(cdp_info)
+            with sync_playwright() as playwright:
+                browser = playwright.chromium.connect_over_cdp(
+                    endpoint,
+                    timeout=int(config.timeout_seconds * 1000),
+                )
+                contexts = browser.contexts
+                if len(contexts) != 1:
+                    raise RuntimeError(f"expected one Roxy context, got {len(contexts)}")
+                browser_context = contexts[0]
+                pages = list(browser_context.pages)
+                page = pages[0] if pages else browser_context.new_page()
+                for stale in pages[1:]:
+                    try:
+                        stale.close()
+                    except Exception:
+                        pass
+                cdp = browser_context.new_cdp_session(page)
+                observer = ApprovalCdpObserver(cdp, self.capture_root / "browser")
+                observer.start()
+                runtime_fingerprint = inspect_roxy_runtime_identity(
+                    cdp,
+                    page,
+                    config,
+                    preserve_randomized=True,
+                )
+                if not runtime_fingerprint.get("verified"):
+                    raise RuntimeError("ROXY_RUNTIME_FINGERPRINT_MISMATCH")
+                approval_url = (
+                    "https://www.paypal.com/agreements/approve?ba_token="
+                    f"{self.ba_token}"
+                )
+                response = page.goto(
+                    approval_url,
+                    wait_until="commit",
+                    timeout=45000,
+                )
+                http_status = int(getattr(response, "status", 0) or 0)
+                page.wait_for_timeout(6000)
+                body = page.content()
+                final_url = str(page.url or approval_url)
+                final_path = urllib.parse.urlsplit(final_url).path or "/"
+                headers = dict(getattr(response, "headers", {}) or {})
+                content_type = str(
+                    headers.get("content-type") or headers.get("Content-Type") or ""
+                )
+                flags = self._control_flags(page)
+                classification = classify_approval_document(
+                    http_status,
+                    content_type,
+                    body,
+                    final_url,
+                    **flags,
+                )
+                (self.capture_root / "browser" / "final.html").write_text(
+                    body,
+                    encoding="utf-8",
+                )
+                try:
+                    page.screenshot(
+                        path=str(self.capture_root / "browser" / "final.png"),
+                        full_page=True,
+                        timeout=3000,
+                    )
+                except Exception:
+                    pass
+                if observer is not None:
+                    transport = observer.summary()
+                    capture_integrity = observer.close()
+                    observer = None
+                browser.close()
+                browser = None
+        except Exception as exc:
+            error_type = type(exc).__name__
+            logger.error(
+                "Approval control failed error_type={} ba_hash={} proxy_hash={} profile_hash={}",
+                error_type,
+                _hash(self.ba_token),
+                _hash(self.proxy_entry.url),
+                _hash(profile_id),
+            )
+        finally:
+            if observer is not None:
+                try:
+                    transport = observer.summary()
+                    capture_integrity = observer.close()
+                except Exception:
+                    pass
+            if browser is not None:
+                try:
+                    browser.close()
+                except Exception:
+                    pass
+            if profile_id:
+                try:
+                    client.close_profile(profile_id)
+                    profile_cleanup = "closed_retained"
+                except Exception:
+                    profile_cleanup = "close_failed_retained"
+            client.close()
+
+        if capture_integrity and not capture_integrity.get("valid"):
+            classification = {
+                **classification,
+                "result": "approval_unknown",
+                "valid": False,
+                "capture_error": "CAPTURE_INTEGRITY_FAILED",
+            }
+        safe = {
+            "status": classification.get("result") or "approval_unknown",
+            "ba_hash": _hash(self.ba_token),
+            "proxy_hash": _hash(self.proxy_entry.url),
+            "country": self.country_profile.country,
+            "profile_source": profile_source,
+            "profile_hash": _hash(profile_id),
+            "profile_detail": profile_detail,
+            "profile_freeze": profile_freeze,
+            "runtime_fingerprint": runtime_fingerprint,
+            "http_status": http_status,
+            "final_path": final_path,
+            "classification": classification,
+            "browser_transport": transport,
+            "capture_integrity": capture_integrity,
+            "profile_cleanup": profile_cleanup,
+            "profile_retained": bool(profile_id),
+            "error_type": error_type,
+            "capture_root": str(self.capture_root),
+        }
+        _write_json(self.capture_root / "checkpoint.json", safe)
+        return safe
+
+
 def default_capture_root(mode: str) -> Path:
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     return Path.cwd() / "captures" / "signup-lab" / f"{stamp}-{mode}"
@@ -1329,7 +1677,11 @@ def _safe_existing_profile_detail(
 ) -> dict[str, Any]:
     """Return only non-secret fields needed for the control comparison."""
     user_agent = str(detail.get("userAgent") or detail.get("user_agent") or "")
-    match = re.search(r"(?:Chrome|Chromium|RoxyChrome)/(\d+)", user_agent, re.I)
+    match = re.search(
+        r"(?:Chrome|Chromium|RoxyChrome|CriOS)/(\d+)",
+        user_agent,
+        re.I,
+    )
     default_urls = detail.get("defaultOpenUrl") or []
     if isinstance(default_urls, str):
         default_urls = [default_urls]
@@ -1352,6 +1704,62 @@ def _safe_existing_profile_detail(
         "proxy_authenticated": bool(
             proxy_info.get("proxyUserName") or proxy_info.get("proxyPassword")
         ),
+    }
+
+
+def classify_approval_document(
+    status: int,
+    content_type: str,
+    body: str,
+    url: str,
+    *,
+    has_email_control: bool = False,
+    has_create_account_control: bool = False,
+) -> dict[str, Any]:
+    """Classify an approval-only result without submitting any page control."""
+    lowered = (body or "").lower()
+    path = urllib.parse.urlsplit(url or "").path.lower().rstrip("/") or "/"
+    challenge = [marker for marker in _CHALLENGE_MARKERS if marker in lowered]
+    if status == 403:
+        challenge.append("approval_http_403")
+    if any(marker in path for marker in ("authchallenge", "/captcha", "datadome")):
+        challenge.append("challenge_url")
+    invalid_ba = [marker for marker in _INVALID_BA_MARKERS if marker in lowered]
+    ready_path = path == "/agreements/approve" or path == "/pay" or path.startswith("/pay/")
+    ready_text = any(
+        marker in lowered
+        for marker in ("pay with paypal", "create an account", "create account")
+    )
+    ready_controls = bool(has_email_control or has_create_account_control)
+    if challenge:
+        result = "approval_challenged"
+    elif invalid_ba:
+        result = "approval_business_error"
+    elif (
+        200 <= int(status or 0) < 400
+        and ready_path
+        and (ready_text or ready_controls)
+        and (not content_type or "html" in content_type.lower())
+    ):
+        result = "approval_ready"
+    elif int(status or 0) <= 0:
+        result = "approval_timeout"
+    else:
+        result = "approval_unknown"
+    return {
+        "result": result,
+        "valid": result == "approval_ready",
+        "status": int(status or 0),
+        "content_type": content_type,
+        "path": path,
+        "bytes": len((body or "").encode("utf-8", errors="replace")),
+        "body_sha256": hashlib.sha256((body or "").encode("utf-8", errors="replace")).hexdigest(),
+        "challenge_markers": list(dict.fromkeys(challenge)),
+        "invalid_ba_markers": invalid_ba,
+        "ready_path": ready_path,
+        "ready_text": ready_text,
+        "has_email_control": bool(has_email_control),
+        "has_create_account_control": bool(has_create_account_control),
     }
 
 
@@ -1465,6 +1873,82 @@ def _persist_proxy_rotation(
         if isinstance(value, dict):
             value["proxy_rotation"] = safe_rotation
             _write_json(checkpoint, value)
+
+
+def run_approval_control_from_file(
+    *,
+    input_file: str | Path,
+    capture_dir: str | Path | None = None,
+    rounds: int = 1,
+    existing_profile_id: str = "",
+    existing_profile_name: str = "",
+) -> dict[str, Any]:
+    """Run independent approval-only rounds with a fresh SID each time."""
+    rounds = max(1, min(int(rounds), 10))
+    root = (
+        Path(capture_dir).expanduser().resolve()
+        if capture_dir
+        else default_capture_root("approval-control").resolve()
+    )
+    results: list[dict[str, Any]] = []
+    for round_index in range(1, rounds + 1):
+        inputs, ba_token, proxy, rotation = SignupLabInputs.reserve_for_profile(
+            input_file
+        )
+        round_root = root / f"round-{round_index:02d}"
+        logger.info(
+            "Approval control round start round={}/{} ba_hash={} proxy_hash={} "
+            "profile_source={} capture={}",
+            round_index,
+            rounds,
+            _hash(ba_token),
+            rotation["proxy_hash"],
+            "existing" if existing_profile_id else "created",
+            round_root,
+        )
+        result = RoxyApprovalControl(
+            ba_token=ba_token,
+            phone=inputs.phone,
+            proxy_line=proxy,
+            capture_root=round_root,
+            existing_profile_id=existing_profile_id,
+            existing_profile_name=existing_profile_name,
+        ).run()
+        challenged = result.get("status") == "approval_challenged"
+        rotation.update(
+            {
+                "cursor_advanced": True,
+                "reason": "approval_control_fresh_sid",
+                "approval_403_quarantined": False,
+            }
+        )
+        if challenged:
+            proxy_hash, added = SignupLabInputs.quarantine_proxy(input_file, proxy)
+            rotation.update(
+                {
+                    "approval_403_quarantined": True,
+                    "quarantine_added": added,
+                    "proxy_hash": proxy_hash,
+                }
+            )
+        _persist_proxy_rotation(round_root, result, rotation)
+        results.append(result)
+    all_ready = len(results) == rounds and all(
+        result.get("status") == "approval_ready" for result in results
+    )
+    safe = {
+        "status": "approval_batch_ready" if all_ready else "approval_batch_failed",
+        "rounds_requested": rounds,
+        "rounds_completed": len(results),
+        "approval_ready_count": sum(
+            result.get("status") == "approval_ready" for result in results
+        ),
+        "all_ready": all_ready,
+        "results": results,
+        "capture_root": str(root),
+    }
+    _write_json(root / "batch-checkpoint.json", safe)
+    return safe
 
 
 def run_signup_lab_from_file(

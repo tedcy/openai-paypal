@@ -52,9 +52,15 @@ def main():
     )
     parser.add_argument(
         "--signup-lab",
-        choices=["reference", "handoff", "cold-protocol"],
+        choices=["reference", "handoff", "cold-protocol", "approval-control"],
         default=None,
         help="Stop at checkoutweb/signup for browser/protocol comparison",
+    )
+    parser.add_argument(
+        "--approval-rounds",
+        type=int,
+        default=1,
+        help="Independent iOS randomized approval-control rounds (1-10)",
     )
     parser.add_argument(
         "--protocol-transport",
@@ -228,8 +234,22 @@ def main():
     logger.remove()
     logger.add(_sanitized_console_sink, level="DEBUG" if args.debug else "INFO")
 
-    if args.signup_lab in {"reference", "handoff", "cold-protocol"}:
-        from paypal.signup_lab import run_signup_lab_from_file
+    if args.signup_lab in {"reference", "handoff", "cold-protocol", "approval-control"}:
+        from paypal.signup_lab import (
+            run_approval_control_from_file,
+            run_signup_lab_from_file,
+        )
+
+        if args.signup_lab == "approval-control":
+            result = run_approval_control_from_file(
+                input_file=args.lab_input_file,
+                capture_dir=args.capture_dir,
+                rounds=args.approval_rounds,
+                existing_profile_id=args.signup_lab_existing_profile_id,
+                existing_profile_name=args.signup_lab_existing_profile_name,
+            )
+            print(json.dumps(sanitize_for_log(result), indent=2, ensure_ascii=False))
+            sys.exit(0 if result.get("status") == "approval_batch_ready" else 1)
 
         result = run_signup_lab_from_file(
             mode=args.signup_lab,
