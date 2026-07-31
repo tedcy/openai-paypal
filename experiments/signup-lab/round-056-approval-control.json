@@ -1,0 +1,35 @@
+{
+  "round": 56,
+  "mode": "approval-control",
+  "control": "unchanged coherent iOS test Profile control with the next fresh SID",
+  "ba_hash": "454fb0ad09889a8a",
+  "proxy_hash": "bc872646ad5e9f04",
+  "profile_hash": "ee3917e3ec1305dc",
+  "proxy_cursor": {
+    "selected": 24,
+    "next": 25,
+    "quarantined": false
+  },
+  "fingerprint_runtime": {
+    "verified": true,
+    "browser": "Chrome 136.0.7103.49",
+    "user_agent": "iOS 18 CriOS 136.0.7103.49",
+    "platform": "iPhone",
+    "headless": false
+  },
+  "result": "APPROVAL_400_GENERIC_ERROR_DEFAULT",
+  "http_status": 400,
+  "final_path": "/agreements/approve",
+  "transport": "http/1.1",
+  "target_document_responses": 1,
+  "capture_integrity": "valid_2_of_2",
+  "response_shape": "redirect body points to checkoutweb/genericError with code DEFAULT and fresh EC/SSRT parameters",
+  "profile_cleanup": "closed_retained",
+  "network_environment_inspected": false,
+  "evidence": [
+    "the same BA hash that reached a security-check document in Round 55 returned a 225-byte HTTP 400 genericError redirect body in Round 56",
+    "the runtime identity remained coherent and the response contained no challenge or explicit invalid/expired BA marker",
+    "no signup, phone, OTP, registration, funding, authorization, or network preflight occurred"
+  ],
+  "conclusion": "Do not classify a single genericError DEFAULT as explicit BA expiry. Repeat the same BA once with a fresh SID/session; if the signature is identical, retire it as a dead end and switch to the user-provided new BA."
+}
