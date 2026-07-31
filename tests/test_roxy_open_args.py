@@ -237,6 +237,47 @@ def test_roxy_v4_summary_detail_uses_visible_and_acknowledged_policy_evidence() 
     assert verification["observed"]["os_version"] == "15.2"
 
 
+def test_roxy_v4_summary_omits_empty_user_agent_until_runtime_verification() -> None:
+    client = RoxyApiClient.__new__(RoxyApiClient)
+    client.config = RoxyCaptureConfig(
+        api_base="http://127.0.0.1:50000",
+        api_key="",
+        proxy_url="http://user:password@proxy.test:3010",
+        language="en-US",
+        display_language="en-US",
+        timezone="GMT+01:00 Europe/Sarajevo",
+    )
+    modified: dict = {}
+    details = [
+        {
+            "dirId": "owned-profile",
+            "coreVersion": "136",
+            "os": "macOS",
+            "osVersion": "15",
+            "userAgent": "",
+        },
+        {
+            "dirId": "owned-profile",
+            "coreVersion": "136",
+            "os": "macOS",
+            "osVersion": "15",
+            "userAgent": "",
+        },
+    ]
+    client.randomize_profile = lambda workspace_id, dir_id: None
+    client.get_profile_detail = lambda workspace_id, dir_id: details.pop(0)
+    client.modify_profile = lambda workspace_id, dir_id, values: modified.update(values) or {"code": 0}
+
+    result = client.randomize_and_freeze_profile(123, "owned-profile")
+    verification = result["verification"]
+
+    assert "userAgent" not in modified
+    assert verification["verified"] is True
+    assert verification["mismatches"] == []
+    assert "user_agent" in verification["unobservable"]
+    assert verification["generated_fields"]["user_agent_present"] is False
+
+
 def test_runtime_identity_verification_uses_cdp_without_webrtc_probe() -> None:
     config = RoxyCaptureConfig(
         api_base="http://127.0.0.1:50000",

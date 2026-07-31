@@ -464,7 +464,9 @@ def _profile_policy_verification(
     if _normalized_major(observed["os_version"]) != _normalized_major(expected["os_version"]):
         mismatches.append("os_version")
     user_agent = observed["user_agent"]
-    if (
+    if not user_agent:
+        unobservable.append("user_agent")
+    elif (
         _normalized_major(user_agent) != config.core_version
         or "macintosh" not in user_agent.lower()
     ):
@@ -1017,9 +1019,11 @@ class RoxyApiClient:
             "proxyInfo": _roxy_proxy_info(self.config.proxy_url),
             "fingerInfo": finger_info,
         }
-        for key in ("windowName", "windowRemark", "searchEngine", "userAgent"):
+        for key in ("windowName", "windowRemark", "searchEngine"):
             if key in before:
                 values[key] = before[key]
+        if before.get("userAgent"):
+            values["userAgent"] = before["userAgent"]
         self.modify_profile(workspace_id, dir_id, values)
         after = self.get_profile_detail(workspace_id, dir_id)
         verification = _profile_policy_verification(
