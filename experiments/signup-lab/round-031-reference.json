@@ -1,0 +1,46 @@
+{
+  "round": 31,
+  "mode": "reference",
+  "country": "BA",
+  "status": "proxy_sid_challenged_and_quarantined",
+  "reported_failure": "ROXY_SIGNUP_CHALLENGED",
+  "response_class": "APPROVAL_403_INTERSTITIAL",
+  "ba_hash": "7822effedee5dbc3",
+  "proxy_hash": "a299826cfbd48ba1",
+  "fingerprint_policy": "legacy-macos15-chrome136",
+  "profile_freeze_verified": true,
+  "runtime_identity_verified": true,
+  "browser_transport": {
+    "http2_disabled": true,
+    "https_http11_responses": 3,
+    "https_h2_responses": 0,
+    "request_events": 6,
+    "response_events": 3,
+    "loading_failed_events": 1,
+    "main_documents": [
+      "/agreements/approve:403:http/1.1",
+      "/interstitial/:200:http/1.1"
+    ]
+  },
+  "capture_integrity": {
+    "valid": true,
+    "records": 22,
+    "invalid_lines": 0
+  },
+  "proxy_rotation": {
+    "selected_proxy_index": 4,
+    "next_proxy_index": 5,
+    "quarantined_proxy_count_before": 4,
+    "approval_403_quarantined": true,
+    "quarantine_added": true
+  },
+  "profile_cleanup": "exact_profile_deleted_after_capture",
+  "evidence": {
+    "capture_path": "captures/signup-lab/round-031-rotated-sid-reference",
+    "process_elapsed_ms": 25700
+  },
+  "conclusion": "The next fresh SID also received approval 403 and was quarantined. Commit-stage classification terminated the challenged navigation without the previous 45-second DOMContentLoaded timeout, while fingerprint, HTTP/1.1, and capture integrity remained valid.",
+  "next_round_focus": "Retry the unchanged reference with the next non-quarantined SID and a fresh Profile; retain the first SID that reaches approval 200.",
+  "network_preflight_used": false,
+  "signup_request_captured": false
+}
