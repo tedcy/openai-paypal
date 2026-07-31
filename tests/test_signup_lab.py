@@ -1,4 +1,5 @@
 import json
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -11,6 +12,7 @@ from paypal.signup_lab import (
     RoxySignupLab,
     SignupLabInputs,
     _configure_roxy_for_signup_lab,
+    audit_jsonl_capture,
     classify_signup_document,
     classify_signup_ui,
 )
@@ -207,7 +209,10 @@ def test_cdp_capture_preserves_event_kind_and_transport_summary(tmp_path) -> Non
         },
     })
 
+    integrity = capture.close()
+
     rows = [json.loads(line) for line in capture.events_path.read_text(encoding="utf-8").splitlines()]
+    assert [row["seq"] for row in rows] == [1, 2]
     assert rows[0]["event_kind"] == "requestWillBeSent"
     assert rows[0]["resource_type"] == "Document"
     assert rows[1]["event_kind"] == "responseReceived"
@@ -224,6 +229,61 @@ def test_cdp_capture_preserves_event_kind_and_transport_summary(tmp_path) -> Non
             "mime_type": "text/html",
         }],
     }
+    assert integrity == {
+        "valid": True,
+        "expected_records": 2,
+        "physical_lines": 2,
+        "valid_json_lines": 2,
+        "invalid_json_lines": 0,
+        "invalid_line_numbers": [],
+        "sequence_contiguous": True,
+    }
+
+
+def test_cdp_capture_serializes_concurrent_jsonl_callbacks(tmp_path) -> None:
+    capture = CdpCapture(None, tmp_path / "browser", pause_signup=False)
+    thread_count = 8
+    events_per_thread = 75
+
+    def write_events(worker: int) -> None:
+        for index in range(events_per_thread):
+            capture._record(
+                "testEvent",
+                {"worker": worker, "index": index, "type": "Document"},
+            )
+
+    threads = [threading.Thread(target=write_events, args=(worker,)) for worker in range(thread_count)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    integrity = capture.close()
+    rows = [json.loads(line) for line in capture.events_path.read_text(encoding="utf-8").splitlines()]
+
+    assert integrity["valid"] is True
+    assert integrity["expected_records"] == thread_count * events_per_thread
+    assert len(rows) == thread_count * events_per_thread
+    assert [row["seq"] for row in rows] == list(range(1, len(rows) + 1))
+    assert all(row["resource_type"] == "Document" for row in rows)
+
+
+def test_capture_integrity_rejects_interleaved_or_truncated_json(tmp_path) -> None:
+    path = tmp_path / "events.jsonl"
+    path.write_text(
+        '{"seq":1,"event_kind":"requestWillBeSent"}\n'
+        '{"seq":2,"event_kind":"responseReceived"'
+        '{"seq":3,"event_kind":"loadingFinished"}\n',
+        encoding="utf-8",
+    )
+
+    integrity = audit_jsonl_capture(path, expected_records=3)
+
+    assert integrity["valid"] is False
+    assert integrity["physical_lines"] == 2
+    assert integrity["valid_json_lines"] == 1
+    assert integrity["invalid_json_lines"] == 1
+    assert integrity["sequence_contiguous"] is False
 
 
 def test_browser_context_tracks_create_and_open_transport_args() -> None:

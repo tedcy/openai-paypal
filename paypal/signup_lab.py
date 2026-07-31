@@ -10,7 +10,9 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import queue
 import re
+import threading
 import time
 import urllib.parse
 from dataclasses import asdict, dataclass, field
@@ -69,6 +71,122 @@ def _append_jsonl(path: Path, value: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(value, ensure_ascii=False, default=str) + "\n")
+
+
+def audit_jsonl_capture(path: Path, *, expected_records: int) -> dict[str, Any]:
+    """Validate that a capture contains one complete JSON object per line."""
+    physical_lines = 0
+    valid_json_lines = 0
+    invalid_line_numbers: list[int] = []
+    sequence: list[int] = []
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            for line_number, raw in enumerate(handle, start=1):
+                physical_lines += 1
+                try:
+                    row = json.loads(raw)
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    invalid_line_numbers.append(line_number)
+                    continue
+                if not isinstance(row, dict):
+                    invalid_line_numbers.append(line_number)
+                    continue
+                valid_json_lines += 1
+                try:
+                    sequence.append(int(row.get("seq")))
+                except (TypeError, ValueError):
+                    sequence.append(-1)
+    except OSError as exc:
+        return {
+            "valid": False,
+            "expected_records": expected_records,
+            "physical_lines": physical_lines,
+            "valid_json_lines": valid_json_lines,
+            "invalid_json_lines": max(1, len(invalid_line_numbers)),
+            "invalid_line_numbers": invalid_line_numbers[:20],
+            "sequence_contiguous": False,
+            "error_type": type(exc).__name__,
+        }
+
+    sequence_contiguous = sequence == list(range(1, expected_records + 1))
+    valid = (
+        not invalid_line_numbers
+        and physical_lines == expected_records
+        and valid_json_lines == expected_records
+        and sequence_contiguous
+    )
+    return {
+        "valid": valid,
+        "expected_records": expected_records,
+        "physical_lines": physical_lines,
+        "valid_json_lines": valid_json_lines,
+        "invalid_json_lines": len(invalid_line_numbers),
+        "invalid_line_numbers": invalid_line_numbers[:20],
+        "sequence_contiguous": sequence_contiguous,
+    }
+
+
+class JsonlCaptureWriter:
+    """Serialize CDP callbacks through one writer and audit the result."""
+
+    _STOP = object()
+
+    def __init__(self, path: Path):
+        self.path = path
+        self._queue: queue.Queue[object] = queue.Queue()
+        self._state_lock = threading.Lock()
+        self._sequence = 0
+        self._closed = False
+        self._writer_error_type = ""
+        self._audit: dict[str, Any] | None = None
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._thread = threading.Thread(
+            target=self._run,
+            name="signup-lab-cdp-writer",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def append(self, value: Mapping[str, Any]) -> None:
+        with self._state_lock:
+            if self._closed:
+                raise RuntimeError("CDP capture writer is closed")
+            self._sequence += 1
+            sequence = self._sequence
+        self._queue.put({"seq": sequence, **dict(value)})
+
+    def _run(self) -> None:
+        try:
+            with self.path.open("w", encoding="utf-8", newline="\n") as handle:
+                while True:
+                    item = self._queue.get()
+                    try:
+                        if item is self._STOP:
+                            return
+                        handle.write(json.dumps(item, ensure_ascii=False, default=str) + "\n")
+                        handle.flush()
+                    finally:
+                        self._queue.task_done()
+        except Exception as exc:
+            self._writer_error_type = type(exc).__name__
+
+    def close(self, *, timeout_seconds: float = 15.0) -> dict[str, Any]:
+        with self._state_lock:
+            if self._audit is not None:
+                return dict(self._audit)
+            if not self._closed:
+                self._closed = True
+                self._queue.put(self._STOP)
+            expected_records = self._sequence
+        self._thread.join(timeout=max(0.1, timeout_seconds))
+        audit = audit_jsonl_capture(self.path, expected_records=expected_records)
+        if self._thread.is_alive():
+            audit.update({"valid": False, "error_type": "WRITER_DRAIN_TIMEOUT"})
+        elif self._writer_error_type:
+            audit.update({"valid": False, "error_type": self._writer_error_type})
+        with self._state_lock:
+            self._audit = dict(audit)
+        return audit
 
 
 def _safe_filename(value: str) -> str:
@@ -184,6 +302,7 @@ class BrowserSignupContext:
     browser_open_args: list[str] = field(default_factory=list)
     http2_disabled_requested: bool = False
     transport_summary: dict[str, Any] = field(default_factory=dict)
+    capture_integrity: dict[str, Any] = field(default_factory=dict)
     stage_timing: dict[str, Any] = field(default_factory=dict)
     ui_generation: str = "unknown"
 
@@ -227,6 +346,8 @@ class CdpCapture:
         self.loading_failed_count = 0
         self.https_protocol_counts: dict[str, int] = {}
         self.main_documents: list[dict[str, Any]] = []
+        self._events_writer = JsonlCaptureWriter(self.events_path)
+        self.capture_integrity: dict[str, Any] = {}
 
     def start(self) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
@@ -248,7 +369,7 @@ class CdpCapture:
         row: dict[str, Any] = {"time": _utc_now(), "event_kind": kind, **payload}
         if resource_type is not None:
             row["resource_type"] = resource_type
-        _append_jsonl(self.events_path, row)
+        self._events_writer.append(row)
 
     def _request(self, event: dict[str, Any]) -> None:
         self.request_event_count += 1
@@ -333,6 +454,11 @@ class CdpCapture:
             self.cdp.send("Fetch.failRequest", {"requestId": self.paused_signup["requestId"], "errorReason": "Aborted"})
         except Exception:
             pass
+
+    def close(self) -> dict[str, Any]:
+        if not self.capture_integrity:
+            self.capture_integrity = self._events_writer.close()
+        return dict(self.capture_integrity)
 
 
 class RoxySignupLab:
@@ -694,6 +820,15 @@ class RoxySignupLab:
                     browser.close()
                 except Exception:
                     pass
+            if capture is not None:
+                context_result.capture_integrity = capture.close()
+                if not context_result.capture_integrity.get("valid"):
+                    context_result.status = "failed"
+                    context_result.classification = {
+                        **context_result.classification,
+                        "error": "CAPTURE_INTEGRITY_FAILED",
+                    }
+                    succeeded = False
             should_delete = bool(profile_id and succeeded and not self.keep_profile)
             if should_delete:
                 try:
@@ -739,6 +874,7 @@ class RoxySignupLab:
                 "http2_disabled_requested": context_result.http2_disabled_requested,
                 **context_result.transport_summary,
             },
+            "capture_integrity": context_result.capture_integrity,
             "stage_timing": context_result.stage_timing,
             "profile_retained": context_result.profile_retained,
             "capture_root": str(self.capture_root),
