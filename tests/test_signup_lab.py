@@ -247,6 +247,7 @@ def test_signup_lab_allows_slow_roxy_profile_startup() -> None:
     _configure_roxy_for_signup_lab(config)
 
     assert config.headless is False
+    assert config.force_open is True
     assert config.close_after_capture is False
     assert config.delete_after_capture is False
     assert config.timeout_seconds == 60.0
@@ -553,6 +554,45 @@ def test_failure_screenshot_is_best_effort_with_short_timeout(tmp_path) -> None:
     assert calls[0]["timeout"] == 3000
     assert calls[0]["full_page"] is True
     assert context.final_url.endswith("/captcha/")
+
+
+def test_roxy_window_hold_keeps_same_page_connected() -> None:
+    waits = []
+
+    class Page:
+        def wait_for_timeout(self, milliseconds):
+            waits.append(milliseconds)
+
+    lab = object.__new__(RoxySignupLab)
+    lab.window_hold_seconds = 2.5
+    context = BrowserSignupContext(profile_id="owned-profile")
+
+    lab._hold_window(Page(), context, reason="failure")
+
+    assert waits == [2500]
+    assert context.window_hold_seconds == 2.5
+    assert context.window_hold_completed is True
+    assert [stage["event"] for stage in context.stages] == [
+        "roxy_window_hold_start",
+        "roxy_window_hold_end",
+    ]
+    assert context.stages[-1]["completed"] is True
+
+
+def test_roxy_window_hold_does_not_mask_original_failure() -> None:
+    class ClosedPage:
+        def wait_for_timeout(self, milliseconds):
+            raise RuntimeError("page closed")
+
+    lab = object.__new__(RoxySignupLab)
+    lab.window_hold_seconds = 2.5
+    context = BrowserSignupContext(profile_id="owned-profile")
+
+    lab._hold_window(ClosedPage(), context, reason="failure")
+
+    assert context.window_hold_completed is False
+    assert context.classification["window_hold_error_type"] == "RuntimeError"
+    assert context.stages[-1]["completed"] is False
 
 
 def test_passive_challenge_signals_are_observed_but_not_terminal() -> None:

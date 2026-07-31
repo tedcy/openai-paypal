@@ -381,6 +381,9 @@ class BrowserSignupContext:
     fingerprint_policy: dict[str, Any] = field(default_factory=dict)
     profile_freeze: dict[str, Any] = field(default_factory=dict)
     runtime_fingerprint: dict[str, Any] = field(default_factory=dict)
+    browser_force_open_requested: bool = False
+    window_hold_seconds: float = 0.0
+    window_hold_completed: bool = False
 
 
 def classify_signup_ui(url: str) -> str:
@@ -397,6 +400,7 @@ def classify_signup_ui(url: str) -> str:
 
 def _configure_roxy_for_signup_lab(config: Any) -> None:
     config.headless = False
+    config.force_open = True
     config.close_after_capture = False
     config.delete_after_capture = False
     config.timeout_seconds = max(
@@ -548,6 +552,7 @@ class RoxySignupLab:
         capture_root: str | Path,
         protocol_transport: str = "httpx",
         keep_profile: bool = False,
+        window_hold_seconds: float = 0.0,
     ):
         if mode not in {"reference", "handoff"}:
             raise ValueError(f"unsupported Roxy signup lab mode: {mode}")
@@ -559,6 +564,7 @@ class RoxySignupLab:
         self.capture_root = Path(capture_root).expanduser().resolve()
         self.protocol_transport = protocol_transport
         self.keep_profile = keep_profile
+        self.window_hold_seconds = max(0.0, min(float(window_hold_seconds), 3600.0))
 
     def _click_first(self, page: Any, labels: tuple[str, ...]) -> bool:
         for label in labels:
@@ -765,6 +771,53 @@ class RoxySignupLab:
         except Exception as exc:
             context.classification["failure_capture_error"] = str(exc)
 
+    def _hold_window(
+        self,
+        page: Any,
+        context: BrowserSignupContext,
+        *,
+        reason: str,
+    ) -> None:
+        seconds = self.window_hold_seconds
+        if seconds <= 0:
+            return
+        context.window_hold_seconds = seconds
+        context.stages.append(
+            {
+                "time": _utc_now(),
+                "event": "roxy_window_hold_start",
+                "reason": reason,
+                "seconds": seconds,
+            }
+        )
+        logger.warning(
+            "Roxy headed window hold start seconds={} reason={} profile_hash={}",
+            seconds,
+            reason,
+            _hash(context.profile_id),
+        )
+        try:
+            page.wait_for_timeout(int(seconds * 1000))
+            context.window_hold_completed = True
+        except Exception as exc:
+            context.classification["window_hold_error_type"] = type(exc).__name__
+        context.stages.append(
+            {
+                "time": _utc_now(),
+                "event": "roxy_window_hold_end",
+                "reason": reason,
+                "seconds": seconds,
+                "completed": context.window_hold_completed,
+            }
+        )
+        logger.warning(
+            "Roxy headed window hold end seconds={} reason={} completed={} profile_hash={}",
+            seconds,
+            reason,
+            context.window_hold_completed,
+            _hash(context.profile_id),
+        )
+
     @staticmethod
     def _extract_context(url: str, html: str) -> tuple[str, str, str]:
         material = f"{url}\n{html}"
@@ -838,6 +891,8 @@ class RoxySignupLab:
             workspace_id=config.workspace_id,
             project_id=config.project_id,
             fingerprint_policy=asdict(ROXY_FINGERPRINT_POLICY),
+            browser_force_open_requested=bool(config.force_open),
+            window_hold_seconds=self.window_hold_seconds,
         )
         context_result.browser_create_args = _roxy_profile_startup_args(
             config.proxy_url,
@@ -908,6 +963,7 @@ class RoxySignupLab:
                     self._drive_to_signup(page, capture, context_result)
                 except Exception:
                     self._capture_failure_page(page, context_result)
+                    self._hold_window(page, context_result, reason="failure")
                     raise
                 cookies = browser_context.cookies()
                 context_result.cookies = cookies
@@ -943,6 +999,7 @@ class RoxySignupLab:
                     page.screenshot(path=str(self.capture_root / "browser" / "final.png"), full_page=True)
                 context_result.same_context_page = len(browser_context.pages) == 1 and browser_context.pages[0] is page
                 succeeded = bool(context_result.classification.get("valid"))
+                self._hold_window(page, context_result, reason="result")
                 browser.close()
                 browser = None
         except Exception as exc:
@@ -1015,6 +1072,12 @@ class RoxySignupLab:
             "capture_integrity": context_result.capture_integrity,
             "stage_timing": context_result.stage_timing,
             "profile_retained": context_result.profile_retained,
+            "window_lifecycle": {
+                "headed": True,
+                "force_open_requested": context_result.browser_force_open_requested,
+                "hold_seconds": context_result.window_hold_seconds,
+                "hold_completed": context_result.window_hold_completed,
+            },
             "capture_root": str(self.capture_root),
         }
         _write_json(self.capture_root / "checkpoint.json", safe)
@@ -1064,6 +1127,7 @@ def run_signup_lab_from_file(
     capture_dir: str | Path | None = None,
     protocol_transport: str = "httpx",
     keep_profile: bool = False,
+    window_hold_seconds: float = 0.0,
 ) -> dict[str, Any]:
     if mode == "cold-protocol":
         inputs = SignupLabInputs.load(input_file)
@@ -1111,6 +1175,7 @@ def run_signup_lab_from_file(
             capture_root=root,
             protocol_transport=protocol_transport,
             keep_profile=keep_profile,
+            window_hold_seconds=window_hold_seconds,
         ).run()
         if _approval_document_has_status(result, 403):
             proxy_hash, added = SignupLabInputs.quarantine_proxy(input_file, proxy)
