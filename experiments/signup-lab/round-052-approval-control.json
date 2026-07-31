@@ -1,0 +1,27 @@
+{
+  "round": 52,
+  "mode": "approval-control",
+  "control": "existing test Profile with the dedicated-Page fix and a fresh SID",
+  "ba_hash": "454fb0ad09889a8a",
+  "proxy_hash": "6abae49ef08fd316",
+  "profile_hash": "ee3917e3ec1305dc",
+  "profile_source": "existing_randomized_control",
+  "proxy_cursor": {
+    "selected": 20,
+    "next": 21,
+    "quarantined": false
+  },
+  "result": "ROXY_PROFILE_DETAIL_TRANSIENT_FAILURE",
+  "failure_stage": "profile_selection",
+  "http_status": 0,
+  "target_document_requests": 0,
+  "profile_cleanup": "closed_retained",
+  "network_environment_inspected": false,
+  "evidence": [
+    "the exact-profile detail call returned a Roxy business error before cache clearing, randomization, CDP attachment, or target navigation",
+    "a later read-only detail call to the fixed 127.0.0.1 Roxy Local API succeeded and confirmed the test Profile name, iOS 18 and Chrome 136",
+    "no approval response, 403, CAPTCHA, signup request, phone, OTP, registration, funding, or authorization action occurred",
+    "the SID was not quarantined because the CTF target was never contacted"
+  ],
+  "conclusion": "Treat the first detail failure as transient Roxy Local API state, not CTF evidence. Repeat unchanged after the Profile detail endpoint is responsive."
+}
