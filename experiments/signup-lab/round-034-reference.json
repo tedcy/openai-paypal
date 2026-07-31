@@ -1,0 +1,59 @@
+{
+  "round": 34,
+  "mode": "reference",
+  "country": "BA",
+  "status": "failed_before_target_navigation",
+  "reported_failure": "ROXY_RUNTIME_FINGERPRINT_MISMATCH",
+  "response_class": "HEADED_WINDOW_FRAME_SIZE_MISMATCH",
+  "ba_hash": "7822effedee5dbc3",
+  "proxy_hash": "42cb8f28b9437e3d",
+  "fingerprint_policy": "legacy-macos15-chrome136",
+  "profile_freeze_verified": true,
+  "runtime_identity_verified": false,
+  "runtime_observation": {
+    "headless_ua": false,
+    "platform": "MacIntel",
+    "outer_width": 1002,
+    "outer_height": 866,
+    "requested_width": 1000,
+    "requested_height": 1000,
+    "mismatches": [
+      "outer_width",
+      "outer_height"
+    ]
+  },
+  "window_lifecycle": {
+    "headed": true,
+    "force_open_requested": true,
+    "hold_seconds": 120,
+    "hold_completed": false,
+    "reason": "runtime gate failed before the current hold boundary"
+  },
+  "browser_transport": {
+    "http2_disabled": true,
+    "request_events": 0,
+    "response_events": 0,
+    "https_h2_responses": 0,
+    "main_documents": []
+  },
+  "capture_integrity": {
+    "valid": true,
+    "records": 0,
+    "invalid_lines": 0
+  },
+  "proxy_rotation": {
+    "selected_proxy_index": 6,
+    "next_proxy_index": 7,
+    "cursor_advanced": true,
+    "approval_403_quarantined": false
+  },
+  "profile_cleanup": "exact_profile_deleted_after_capture",
+  "evidence": {
+    "capture_path": "captures/signup-lab/round-034-headed-hold-reference",
+    "target_requests": 0
+  },
+  "conclusion": "Roxy honored headless=false and forceOpen=true, but the visible window frame produced a two-pixel outer-size delta. The strict local runtime gate stopped before approval, so this run says nothing about the BA or proxy SID and did not exercise the 120-second hold.",
+  "next_round_focus": "Normalize a headed window-frame delta of at most two pixels and move the hold boundary ahead of runtime-gate failure, then use a fresh Profile and the next SID.",
+  "network_preflight_used": false,
+  "signup_request_captured": false
+}
