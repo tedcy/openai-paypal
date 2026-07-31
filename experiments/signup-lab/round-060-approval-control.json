@@ -1,0 +1,42 @@
+{
+  "round": 60,
+  "mode": "approval-control",
+  "control": "second fresh-SID test Profile sample for newly supplied BA candidate one",
+  "ba_hash": "15e96bc757b6d93f",
+  "proxy_hash": "088fb9e504810515",
+  "profile_hash": "ee3917e3ec1305dc",
+  "proxy_cursor": {
+    "selected": 28,
+    "next": 29,
+    "quarantined": true
+  },
+  "fingerprint_runtime": {
+    "verified": true,
+    "browser": "Chrome 136.0.7103.49",
+    "user_agent": "iOS 18 CriOS 136.0.7103.49",
+    "platform": "iPhone",
+    "headless": false
+  },
+  "result": "APPROVAL_PAY_200_WITH_PASSIVE_CAPTCHA_MARKER",
+  "http_status": 200,
+  "final_path": "/pay",
+  "transport": "http/1.1",
+  "capture_integrity": "valid_2_of_2",
+  "challenge_markers": [
+    "captcha"
+  ],
+  "approval_controls": {
+    "email": true,
+    "create_account": true
+  },
+  "profile_cleanup": "closed_retained",
+  "network_environment_inspected": false,
+  "evidence": [
+    "a second independent SID and randomized fingerprint reached /pay with HTTP 200 over HTTP/1.1",
+    "the document again exposed both the email and Create Account controls and did not enter checkoutweb/genericError",
+    "only a passive CAPTCHA string caused conservative challenge classification; no terminal challenge document was observed",
+    "the coherent headed iOS runtime and all two captured records verified",
+    "no challenge was solved and no Create Account, signup, phone, OTP, registration, funding, or authorization action occurred"
+  ],
+  "conclusion": "BA hash 15e96bc757b6d93f now has two independent ready /pay documents without genericError or HTTP 403. Preserve all variables except the required fresh SID/randomized Profile state and run the third gate sample."
+}
