@@ -64,7 +64,7 @@ def main():
     )
     parser.add_argument(
         "--protocol-transport",
-        choices=["httpx", "curl-chrome"],
+        choices=["httpx", "httpx-http1", "curl-chrome", "curl-chrome-http1"],
         default="httpx",
         help="HTTP transport used for signup lab protocol requests",
     )

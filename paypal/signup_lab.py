@@ -618,6 +618,15 @@ class RoxySignupLab:
     ):
         if mode not in {"reference", "handoff"}:
             raise ValueError(f"unsupported Roxy signup lab mode: {mode}")
+        if protocol_transport not in {
+            "httpx",
+            "httpx-http1",
+            "curl-chrome",
+            "curl-chrome-http1",
+        }:
+            raise ValueError(
+                f"unsupported signup lab protocol transport: {protocol_transport}"
+            )
         self.mode = mode
         self.ba_token = parse_ba_token(ba_token)
         self.phone = phone
@@ -1025,19 +1034,35 @@ class RoxySignupLab:
             headers["Cookie"] = cookie_header
         output.mkdir(parents=True, exist_ok=True)
         _write_json(output / "request.json", {"method": "GET", "url": url, "headers": headers})
-        if self.protocol_transport == "curl-chrome":
+        if self.protocol_transport in {"curl-chrome", "curl-chrome-http1"}:
             try:
+                from curl_cffi import CurlHttpVersion
                 from curl_cffi.requests import Session as CurlSession
             except ImportError as exc:
                 raise RuntimeError("curl_cffi is required for curl-chrome transport") from exc
-            client: Any = CurlSession(impersonate="chrome")
+            client: Any = CurlSession(impersonate="chrome136")
             client.proxies = {"http": self.proxy_entry.url, "https": self.proxy_entry.url}
-            response = client.get(url, headers=headers, timeout=30, allow_redirects=False)
+            request_options: dict[str, Any] = {}
+            if self.protocol_transport == "curl-chrome-http1":
+                request_options["http_version"] = CurlHttpVersion.V1_1
+            response = client.get(
+                url,
+                headers=headers,
+                timeout=30,
+                allow_redirects=False,
+                **request_options,
+            )
             body = response.text
             response_headers = dict(response.headers)
             client.close()
         else:
-            with httpx.Client(proxy=self.proxy_entry.url, timeout=30, follow_redirects=False, http2=True, trust_env=False) as client:
+            with httpx.Client(
+                proxy=self.proxy_entry.url,
+                timeout=30,
+                follow_redirects=False,
+                http2=self.protocol_transport == "httpx",
+                trust_env=False,
+            ) as client:
                 response = client.get(url, headers=headers)
                 body = response.text
                 response_headers = dict(response.headers)

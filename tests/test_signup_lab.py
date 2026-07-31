@@ -95,6 +95,33 @@ def test_signup_lab_inputs_route_bosnia_phone_and_proxy(tmp_path) -> None:
     assert lab.proxy_entry.username == "ba-user"
 
 
+@pytest.mark.parametrize(
+    "transport",
+    ["httpx", "httpx-http1", "curl-chrome", "curl-chrome-http1"],
+)
+def test_signup_lab_accepts_explicit_protocol_transports(
+    tmp_path, transport: str
+) -> None:
+    lab = RoxySignupLab(
+        mode="handoff",
+        ba_token="BA-12345678ABCDEF",
+        phone="+38761123456",
+        proxy_line="proxy.test:3010:user:password",
+        capture_root=tmp_path / transport,
+        protocol_transport=transport,
+    )
+
+    assert lab.protocol_transport == transport
+
+
+def test_signup_lab_http1_transports_are_explicit() -> None:
+    source = inspect.getsource(RoxySignupLab._protocol_handoff)
+
+    assert 'impersonate="chrome136"' in source
+    assert "CurlHttpVersion.V1_1" in source
+    assert 'self.protocol_transport == "httpx"' in source
+
+
 def test_manual_navigation_requires_explicit_existing_profile(tmp_path) -> None:
     with pytest.raises(ValueError, match="manual navigation requires"):
         RoxySignupLab(
