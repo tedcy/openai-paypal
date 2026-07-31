@@ -378,10 +378,33 @@ def test_signup_document_requires_healthy_signup_html() -> None:
         "<html>DataDome Security Challenge</html>",
         "https://www.paypal.com/checkoutweb/signup?token=EC-12345678",
     )
+    healthy_with_passive_helpers = classify_signup_document(
+        200,
+        "text/html",
+        "<html><script>window.__INITIAL_DATA__={}</script>"
+        "<script src='/authchallenge/hcaptcha-passive.js'></script>"
+        "<div>checkoutweb signup</div></html>",
+        "https://www.paypal.com/checkoutweb/signup?token=EC-12345678",
+    )
+    challenged_200 = classify_signup_document(
+        200,
+        "text/html",
+        "<html>DataDome Security Challenge CAPTCHA</html>",
+        "https://www.paypal.com/checkoutweb/signup?token=EC-12345678",
+    )
 
     assert valid["valid"] is True
     assert challenged["valid"] is False
     assert set(challenged["challenge_markers"]) >= {"datadome", "security challenge"}
+    assert challenged["terminal_challenge_markers"]
+    assert healthy_with_passive_helpers["valid"] is True
+    assert set(healthy_with_passive_helpers["passive_challenge_markers"]) == {
+        "authchallenge",
+        "captcha",
+    }
+    assert healthy_with_passive_helpers["terminal_challenge_markers"] == []
+    assert challenged_200["valid"] is False
+    assert challenged_200["terminal_challenge_markers"]
 
 
 def test_signup_lab_rejects_missing_pool(tmp_path) -> None:

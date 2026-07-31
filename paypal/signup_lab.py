@@ -225,16 +225,26 @@ def classify_signup_document(status: int, content_type: str, body: str, url: str
     lowered = (body or "").lower()
     challenge = [marker for marker in _CHALLENGE_MARKERS if marker in lowered]
     invalid_ba = [marker for marker in _INVALID_BA_MARKERS if marker in lowered]
+    path = urllib.parse.urlsplit(url or "").path.lower().rstrip("/") or "/"
     signup_shape = any(
         marker in lowered
         for marker in ("__initial_data__", "checkoutweb", "weasley", "signup")
     )
+    challenge_path = any(
+        marker in path
+        for marker in ("authchallenge", "/captcha", "datadome", "/interstitial")
+    )
+    terminal_challenge = bool(challenge) and (
+        int(status or 0) >= 400 or challenge_path or not signup_shape
+    )
+    passive_challenge = challenge if challenge and not terminal_challenge else []
     valid = (
         status == 200
         and "text/html" in (content_type or "").lower()
-        and "/checkoutweb/signup" in (url or "")
+        and path == "/checkoutweb/signup"
         and signup_shape
-        and not challenge
+        and not terminal_challenge
+        and not invalid_ba
     )
     return {
         "valid": valid,
@@ -243,6 +253,8 @@ def classify_signup_document(status: int, content_type: str, body: str, url: str
         "bytes": len((body or "").encode("utf-8", errors="replace")),
         "body_sha256": hashlib.sha256((body or "").encode("utf-8", errors="replace")).hexdigest(),
         "challenge_markers": challenge,
+        "terminal_challenge_markers": challenge if terminal_challenge else [],
+        "passive_challenge_markers": passive_challenge,
         "invalid_ba_markers": invalid_ba,
         "signup_shape": signup_shape,
     }
