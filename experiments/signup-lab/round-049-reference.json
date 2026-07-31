@@ -1,0 +1,24 @@
+{
+  "round": 49,
+  "mode": "reference",
+  "control": "strict no-CDP explicit address-bar navigation after removing a restored challenge tab",
+  "ba_hash": "454fb0ad09889a8a",
+  "proxy_hash": "49e6d1a08f45c71a",
+  "device_name_hash": "2aa7f58e129ec389",
+  "mac_hash": "1e283fa1add8fda9",
+  "cache_clear": "roxy_native_all",
+  "cdp_connected": false,
+  "open_payload_overrides": "none",
+  "navigation_source": "visible_address_bar",
+  "result": "approval_challenge_subdocument_failed_open",
+  "status": "not_observed_without_cdp",
+  "profile_cleanup": "left_open_not_deleted",
+  "evidence": [
+    "Roxy closed and cleared the exact test Profile, accepted a fresh SID, device name, and MAC, then opened without CDP",
+    "a challenge tab restored from the previous run was closed before the new explicit navigation",
+    "the BA URL was entered explicitly through the visible address bar",
+    "the main document exposed a DataDome challenge container and the challenge subdocument ended without page data",
+    "no CAPTCHA or page control was used"
+  ],
+  "conclusion": "This SID and identity also failed before the approval/pay page. Preserve the BA and continue rotating clean identities because the result is a challenge failure, not a BA-invalid response."
+}
