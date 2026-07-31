@@ -1,0 +1,48 @@
+{
+  "round": 33,
+  "mode": "reference",
+  "country": "BA",
+  "status": "proxy_sid_challenged_and_quarantined",
+  "reported_failure": "ROXY_SIGNUP_CHALLENGED",
+  "response_class": "APPROVAL_403_CAPTCHA",
+  "ba_hash": "7822effedee5dbc3",
+  "proxy_hash": "56d699e4f3ad65a9",
+  "fingerprint_policy": "legacy-macos15-chrome136",
+  "profile_freeze_verified": true,
+  "runtime_identity_verified": true,
+  "runtime_os_coherent": true,
+  "browser_transport": {
+    "http2_disabled": true,
+    "https_http11_responses": 5,
+    "https_h2_responses": 0,
+    "request_events": 9,
+    "response_events": 5,
+    "loading_failed_events": 2,
+    "main_documents": [
+      "/agreements/approve:403:http/1.1",
+      "/captcha/:200:http/1.1"
+    ]
+  },
+  "capture_integrity": {
+    "valid": true,
+    "records": 32,
+    "invalid_lines": 0
+  },
+  "proxy_rotation": {
+    "selected_proxy_index": 5,
+    "next_proxy_index": 6,
+    "quarantined_proxy_count_before": 5,
+    "approval_403_quarantined": true,
+    "quarantine_added": true
+  },
+  "profile_cleanup": "exact_profile_deleted_after_capture",
+  "evidence": {
+    "capture_path": "captures/signup-lab/round-033-same-sid-runtime-gated-reference",
+    "process_elapsed_ms": 69200,
+    "failure_screenshot_timeout_ms": 30000
+  },
+  "conclusion": "The same SID was repeated with a coherent macOS UA and MacIntel platform after fixing the runtime gate. Approval still returned 403 plus CAPTCHA, so the SID is now validly quarantined. The remaining long tail came from best-effort failure screenshot timeout, not target navigation.",
+  "next_round_focus": "Bound failure screenshot capture to a short timeout, then retry the unchanged reference with the next non-quarantined SID and a fresh Profile.",
+  "network_preflight_used": false,
+  "signup_request_captured": false
+}
