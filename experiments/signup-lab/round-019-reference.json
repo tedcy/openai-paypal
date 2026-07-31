@@ -1,0 +1,22 @@
+{
+  "round": 19,
+  "mode": "reference",
+  "status": "ROXY_COUNTRY_OPTION_MISSING",
+  "ba_hash": "20b1939e7a12c001",
+  "proxy_hash": "1ca1868089ae2dba",
+  "country": "BA",
+  "ui_generation": "unknown",
+  "last_stage": "pay_country_option",
+  "evidence": [
+    "CDP observed 126 target HTTPS responses over http/1.1 and zero h2 responses",
+    "a single Country select click followed by a bounded 10-second poll rendered no Bosnia and Herzegovina or +387 option",
+    "the failure DOM and screenshot again contained no open country-option surface",
+    "the result repeated the Round 18 failure signature with a materially longer hydration window",
+    "no country option, phone number, SMS, registration, funding, or authorization action occurred"
+  ],
+  "dead_ends": [
+    "using the pay-page Country select to convert this BA session from the US contact-signup surface to legacy checkoutweb signup"
+  ],
+  "next_round_focus": "revert the country-selection experiments and keep protocol handoff gated because no valid checkoutweb signup reference exists",
+  "capture_path": "captures/signup-lab/round-019-ba-country-reference"
+}
