@@ -1,0 +1,37 @@
+{
+  "round": 58,
+  "mode": "approval-control",
+  "control": "single fresh-SID sample using the then-current BA before the operator reported that BA expired",
+  "ba_hash": "2a04ea05b9b222c2",
+  "proxy_hash": "4d50d8a1d7604a9b",
+  "profile_hash": "ee3917e3ec1305dc",
+  "proxy_cursor": {
+    "selected": 26,
+    "next": 27,
+    "quarantined": false
+  },
+  "fingerprint_runtime": {
+    "verified": true,
+    "browser": "Chrome 136.0.7103.49",
+    "user_agent": "iOS 18 CriOS 136.0.7103.49",
+    "platform": "iPhone",
+    "headless": false
+  },
+  "result": "APPROVAL_GENERIC_ERROR_TARGET_CLOSED_EXPIRED_BA_CONFOUND",
+  "http_status": 200,
+  "final_path": "/checkoutweb/genericError",
+  "transport": "http/1.1",
+  "capture_integrity": "valid_3_of_3",
+  "failure_stage": "approval_navigation",
+  "error_type": "TargetClosedError",
+  "profile_cleanup": "closed_retained",
+  "network_environment_inspected": false,
+  "evidence": [
+    "the coherent headed iOS runtime passed before the approval request",
+    "the captured main document reached checkoutweb/genericError with HTTP 200 over HTTP/1.1",
+    "the controlled Page then closed during approval navigation, while all three captured records remained valid JSONL",
+    "the operator subsequently reported that this BA had expired, so this sample cannot determine whether Profile policy caused the response",
+    "no challenge was solved and no signup, phone, OTP, registration, funding, or authorization action occurred"
+  ],
+  "conclusion": "Treat this as BA-lifecycle-confounded evidence only. Do not quarantine its SID or use it to reject the coherent iOS Profile hypothesis; replace the local BA candidates with the two newly supplied values and apply the operator-defined genericError failover rule."
+}
