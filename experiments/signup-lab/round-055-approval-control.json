@@ -1,0 +1,43 @@
+{
+  "round": 55,
+  "mode": "approval-control",
+  "control": "existing test Profile with coherent randomized iOS runtime, paced Roxy management API and a fresh SID",
+  "ba_hash": "454fb0ad09889a8a",
+  "proxy_hash": "93b68f8894b98986",
+  "profile_hash": "ee3917e3ec1305dc",
+  "proxy_cursor": {
+    "selected": 23,
+    "next": 24,
+    "quarantined": true
+  },
+  "fingerprint_runtime": {
+    "verified": true,
+    "browser": "Chrome 136.0.7103.49",
+    "user_agent": "iOS 18 CriOS 136.0.7103.49",
+    "platform": "iPhone",
+    "screen": "480x854",
+    "timezone": "Europe/Sarajevo",
+    "headless": false
+  },
+  "result": "APPROVAL_200_TERMINAL_SECURITY_CHECK",
+  "http_status": 200,
+  "final_path": "/agreements/approve",
+  "transport": "http/1.1",
+  "target_document_responses": 2,
+  "capture_integrity": "valid_4_of_4",
+  "challenge_markers": [
+    "authchallengenodeweb",
+    "hcaptchapassive",
+    "security check"
+  ],
+  "visible_text_shape": "security check with Continue control; no email or Create Account control",
+  "profile_cleanup": "closed_retained",
+  "network_environment_inspected": false,
+  "evidence": [
+    "profile mutation, dedicated Page creation and strict iOS runtime verification all completed",
+    "the approval main document returned HTTP 200 over HTTP/1.1, followed by a passive hCaptcha evaluation document",
+    "the final DOM contained a security-check interstitial and no approval-ready controls, so HTTP 200 alone is not success",
+    "no CAPTCHA was solved or clicked and no signup, phone, OTP, registration, funding, or authorization action occurred"
+  ],
+  "conclusion": "This is the first valid target sample after the lifecycle, UA and Local API fixes, but it is a terminal security-check generation rather than approval_ready. Repeat with new SIDs before changing the fingerprint policy."
+}
