@@ -1,0 +1,20 @@
+{
+  "round": 14,
+  "mode": "reference",
+  "status": "ROXY_CONTACT_SIGNUP_STOPPED",
+  "ba_hash": "20b1939e7a12c001",
+  "proxy_hash": "1ca1868089ae2dba",
+  "country": "BA",
+  "ui_generation": "contact_signup",
+  "last_stage": "pay_checkout_signup_contact",
+  "evidence": [
+    "the exact Roxy launchOptions.args contained remote-allow-origins, disable-audio-output, and disable-http2",
+    "CDP observed 95 target HTTPS responses over http/1.1 and zero h2 responses",
+    "agreements/approve and pay/checkout/signup/contact both returned HTTP 200",
+    "the BA route selected the contact-signup UI rather than checkoutweb/signup",
+    "the lab stopped before submitting the phone number and did not trigger SMS or later payment phases"
+  ],
+  "dead_ends": [],
+  "next_round_focus": "repeat the same BA and proxy once in a fresh profile to confirm the UI generation result",
+  "capture_path": "captures/signup-lab/round-014-ba-http1-reference"
+}
