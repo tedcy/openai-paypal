@@ -1,0 +1,38 @@
+{
+  "round": 53,
+  "mode": "approval-control",
+  "control": "existing test Profile with dedicated CDP Page, fresh SID and randomized iOS policy",
+  "ba_hash": "454fb0ad09889a8a",
+  "proxy_hash": "f9a57911267c08b5",
+  "profile_hash": "ee3917e3ec1305dc",
+  "proxy_cursor": {
+    "selected": 21,
+    "next": 22,
+    "quarantined": false
+  },
+  "result": "PRE_NAVIGATION_IOS_UA_INCONSISTENT",
+  "failure_stage": "runtime_fingerprint_verification",
+  "runtime": {
+    "browser": "Chrome 136",
+    "platform": "iPhone",
+    "screen": "480x854",
+    "user_agent_os": "Windows",
+    "mismatch": "user_agent_os"
+  },
+  "http_status": 0,
+  "target_document_requests": 0,
+  "capture_integrity": "valid_0_of_0",
+  "page_lifecycle": {
+    "dedicated_page_created": true,
+    "startup_pages_closed": 4
+  },
+  "profile_cleanup": "closed_retained",
+  "network_environment_inspected": false,
+  "evidence": [
+    "the dedicated Page survived creation and the CDP runtime inspection completed",
+    "Roxy exposed iPhone platform and 480x854 screen values while retaining a Windows Chrome 136 top-level user agent",
+    "the strict runtime gate stopped before the first approval request, so no CTF response or 403 was observed",
+    "the SID was not quarantined and no signup, phone, OTP, registration, funding, or authorization action occurred"
+  ],
+  "conclusion": "The remaining pre-navigation mismatch is the top-level UA. Fix only the iOS CriOS/136 UA while preserving random_env-generated noise, then repeat with a fresh SID."
+}
