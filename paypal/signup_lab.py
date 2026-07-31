@@ -589,6 +589,23 @@ class RoxySignupLab:
             return "approval"
         return "unknown"
 
+    @staticmethod
+    def _navigate_to_approval(
+        page: Any,
+        approval_url: str,
+        context: BrowserSignupContext,
+    ) -> Any:
+        # Waiting for DOMContentLoaded can stall on a 403 document whose body
+        # never finishes.  A committed navigation already exposes the main
+        # response status and lets the lab terminate the challenged SID.
+        response = page.goto(approval_url, wait_until="commit", timeout=45000)
+        if int(getattr(response, "status", 0) or 0) == 403:
+            context.challenge_markers = list(
+                dict.fromkeys([*context.challenge_markers, "approval_http_403"])
+            )
+            raise RuntimeError("ROXY_SIGNUP_CHALLENGED")
+        return response
+
     def _capture_controls(self, page: Any, context: BrowserSignupContext, stage: str) -> None:
         try:
             controls = page.locator("input, select, textarea, button, a").evaluate_all(
@@ -882,8 +899,8 @@ class RoxySignupLab:
                     raise RuntimeError("ROXY_RUNTIME_FINGERPRINT_MISMATCH")
                 approval_url = f"https://www.paypal.com/agreements/approve?ba_token={self.ba_token}"
                 context_result.stages.append({"time": _utc_now(), "event": "approval_start"})
-                page.goto(approval_url, wait_until="domcontentloaded", timeout=45000)
                 try:
+                    self._navigate_to_approval(page, approval_url, context_result)
                     self._drive_to_signup(page, capture, context_result)
                 except Exception:
                     self._capture_failure_page(page, context_result)

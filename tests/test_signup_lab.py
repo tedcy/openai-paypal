@@ -510,6 +510,27 @@ def test_roxy_signup_lab_classifies_navigation_stage(url: str, expected: str) ->
     assert RoxySignupLab._page_stage(url) == expected
 
 
+def test_approval_navigation_stops_at_committed_403() -> None:
+    calls = []
+
+    class Page:
+        def goto(self, url, **kwargs):
+            calls.append((url, kwargs))
+            return SimpleNamespace(status=403)
+
+    context = BrowserSignupContext()
+
+    with pytest.raises(RuntimeError, match="ROXY_SIGNUP_CHALLENGED"):
+        RoxySignupLab._navigate_to_approval(
+            Page(),
+            "https://www.paypal.com/agreements/approve?ba_token=REDACTED",
+            context,
+        )
+
+    assert calls[0][1] == {"wait_until": "commit", "timeout": 45000}
+    assert context.challenge_markers == ["approval_http_403"]
+
+
 def test_passive_challenge_signals_are_observed_but_not_terminal() -> None:
     lab = object.__new__(RoxySignupLab)
     page = type("Page", (), {
