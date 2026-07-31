@@ -6,6 +6,7 @@ from paypal.roxy_fingerprint import (
     RoxyCaptureConfig,
     _roxy_open_args,
     _roxy_profile_startup_args,
+    inspect_roxy_runtime_identity,
     load_roxy_capture_config,
 )
 
@@ -103,3 +104,117 @@ def test_open_profile_sends_disable_http2_for_proxy() -> None:
     assert calls[0][2]["json"]["args"].count("--disable-http2") == 1
     assert calls[0][2]["json"]["args"].count("--window-size=1000,1000") == 1
     assert calls[0][2]["json"]["headless"] is False
+
+
+def test_randomize_and_freeze_preserves_roxy_noise_and_reapplies_policy() -> None:
+    client = RoxyApiClient.__new__(RoxyApiClient)
+    client.config = RoxyCaptureConfig(
+        api_base="http://127.0.0.1:50000",
+        api_key="",
+        proxy_url="http://user:password@proxy.test:3010",
+        language="en-US",
+        display_language="en-US",
+        timezone="GMT+01:00 Europe/Sarajevo",
+    )
+    before = {
+        "dirId": "owned-profile",
+        "coreType": "Chrome",
+        "coreVersion": "136",
+        "os": "macOS",
+        "osVersion": "15",
+        "windowName": "paypal-fp-test",
+        "windowRemark": "paypal runtime fingerprint capture",
+        "fingerInfo": {
+            "canvas": {"noise": "roxy-generated"},
+            "audioContext": {"noise": "roxy-generated"},
+            "webRTC": 2,
+            "randomFingerprint": True,
+            "webGLManufacturer": "Google Inc. (Intel Inc.)",
+            "webGLRender": "ANGLE Metal Renderer: Intel(R) UHD Graphics 617",
+            "hardwareConcurrent": "8",
+            "deviceMemory": "8",
+        },
+    }
+    events: list[str] = []
+    modified: dict = {}
+
+    client.randomize_profile = lambda workspace_id, dir_id: events.append("random")
+
+    def detail(workspace_id, dir_id):
+        events.append("detail")
+        if not modified:
+            return before
+        return {
+            "dirId": dir_id,
+            "coreType": modified["coreType"],
+            "coreVersion": modified["coreVersion"],
+            "os": modified["os"],
+            "osVersion": modified["osVersion"],
+            "fingerInfo": modified["fingerInfo"],
+        }
+
+    def modify(workspace_id, dir_id, values):
+        events.append("modify")
+        modified.update(values)
+
+    client.get_profile_detail = detail
+    client.modify_profile = modify
+
+    result = client.randomize_and_freeze_profile(123, "owned-profile")
+
+    assert events == ["random", "detail", "modify", "detail"]
+    assert result["verification"]["verified"] is True
+    assert modified["coreType"] == "Chrome"
+    assert modified["coreVersion"] == "136"
+    assert modified["os"] == "macOS"
+    assert modified["osVersion"] == "15"
+    assert modified["fingerInfo"]["webRTC"] == 0
+    assert modified["fingerInfo"]["randomFingerprint"] is False
+    assert modified["fingerInfo"]["canvas"] == {"noise": "roxy-generated"}
+    assert modified["fingerInfo"]["audioContext"] == {"noise": "roxy-generated"}
+    assert modified["fingerInfo"]["webGLManufacturer"] == "Google Inc. (Intel Inc.)"
+    assert "Apple M3" not in modified["fingerInfo"]["webGLRender"]
+
+
+def test_runtime_identity_verification_uses_cdp_without_webrtc_probe() -> None:
+    config = RoxyCaptureConfig(
+        api_base="http://127.0.0.1:50000",
+        api_key="",
+        language="en-US",
+        display_language="en-US",
+        timezone="GMT+01:00 Europe/Sarajevo",
+    )
+
+    class Cdp:
+        def send(self, method):
+            assert method == "Browser.getVersion"
+            return {"product": "Chrome/136.0.7103.93", "protocolVersion": "1.3"}
+
+    class Page:
+        def evaluate(self, script):
+            assert "RTCPeerConnection" not in script
+            assert "candidate" not in script.lower()
+            return {
+                "userAgent": (
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/136.0.7103.93 Safari/537.36"
+                ),
+                "platform": "MacIntel",
+                "language": "en-US",
+                "languages": ["en-US", "en"],
+                "timezone": "Europe/Sarajevo",
+                "screen": {"width": 1536, "height": 864},
+                "window": {
+                    "innerWidth": 1000,
+                    "innerHeight": 913,
+                    "outerWidth": 1000,
+                    "outerHeight": 1000,
+                },
+            }
+
+    verification = inspect_roxy_runtime_identity(Cdp(), Page(), config)
+
+    assert verification["verified"] is True
+    assert verification["mismatches"] == []
+    assert verification["observed"]["headless_ua"] is False

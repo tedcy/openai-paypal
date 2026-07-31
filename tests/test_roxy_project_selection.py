@@ -59,7 +59,7 @@ def test_roxy_timezone_rejects_unsupported_profile_timezone() -> None:
         roxy_timezone_value({"timezone": "America/New_York"})
 
 
-def test_quota_fallback_does_not_reuse_profile_from_another_project(
+def test_quota_error_propagates_without_enumerating_or_reusing_profiles(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = RoxyApiClient.__new__(RoxyApiClient)
@@ -70,41 +70,21 @@ def test_quota_fallback_does_not_reuse_profile_from_another_project(
             RoxyFingerprintError("窗口额度不足")
         ),
     )
-    monkeypatch.setattr(client, "cleanup_paypal_auto_profiles", lambda workspace_id: 0)
-    monkeypatch.setattr(
-        client,
-        "list_profiles",
-        lambda workspace_id: [
-            {
-                "dirId": "gpt-profile",
-                "projectId": 149639,
-            }
-        ],
-    )
-
-    with pytest.raises(RoxyFingerprintError, match=r"project 148735.*无可复用"):
+    with pytest.raises(RoxyFingerprintError, match="窗口额度不足"):
         client.create_or_reuse_profile(108643, 148735)
 
+    assert not hasattr(client, "list_profiles")
+    assert not hasattr(client, "cleanup_paypal_auto_profiles")
 
-def test_quota_fallback_reuses_profile_from_selected_project(
+
+def test_owned_profile_creation_returns_only_the_new_profile_id(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = RoxyApiClient.__new__(RoxyApiClient)
     monkeypatch.setattr(
         client,
         "create_profile",
-        lambda workspace_id, project_id: (_ for _ in ()).throw(
-            RoxyFingerprintError("窗口额度不足")
-        ),
-    )
-    monkeypatch.setattr(client, "cleanup_paypal_auto_profiles", lambda workspace_id: 0)
-    monkeypatch.setattr(
-        client,
-        "list_profiles",
-        lambda workspace_id: [
-            {"dirId": "gpt-profile", "projectId": 149639},
-            {"dirId": "pp-profile", "projectId": 148735},
-        ],
+        lambda workspace_id, project_id: "new-owned-profile",
     )
 
-    assert client.create_or_reuse_profile(108643, 148735) == "pp-profile"
+    assert client.create_or_reuse_profile(108643, 148735) == "new-owned-profile"

@@ -10,7 +10,7 @@ import re
 import time
 import urllib.parse
 import uuid
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Iterable, Mapping, cast
 
@@ -398,6 +398,164 @@ class RoxyFingerprintPolicy:
 ROXY_FINGERPRINT_POLICY = RoxyFingerprintPolicy()
 
 
+def _profile_finger_info(detail: Mapping[str, Any]) -> dict[str, Any]:
+    value: Any = detail.get("fingerInfo")
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            value = {}
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _normalized_major(value: object) -> str:
+    text = str(value or "")
+    match = re.search(r"(?:Chrome|Chromium|RoxyChrome)/(\d+)", text, re.I)
+    if not match:
+        match = re.search(r"(?:^|/)(\d+)", text)
+    return match.group(1) if match else ""
+
+
+def _profile_policy_verification(
+    detail: Mapping[str, Any],
+    config: RoxyCaptureConfig,
+) -> dict[str, Any]:
+    finger_info = _profile_finger_info(detail)
+    observed = {
+        "core_type": str(detail.get("coreType") or detail.get("core_type") or ""),
+        "core_version": str(detail.get("coreVersion") or detail.get("core_version") or ""),
+        "os_name": str(detail.get("os") or ""),
+        "os_version": str(detail.get("osVersion") or detail.get("os_version") or ""),
+        "web_rtc_mode": finger_info.get("webRTC"),
+        "random_fingerprint": finger_info.get("randomFingerprint"),
+        "language": str(finger_info.get("language") or ""),
+        "display_language": str(finger_info.get("displayLanguage") or ""),
+        "timezone": str(finger_info.get("timeZone") or ""),
+        "open_width": str(finger_info.get("openWidth") or ""),
+        "open_height": str(finger_info.get("openHeight") or ""),
+    }
+    expected = {
+        "core_type": config.core_type,
+        "core_version": config.core_version,
+        "os_name": config.os_name,
+        "os_version": config.os_version,
+        "web_rtc_mode": config.web_rtc_mode,
+        "random_fingerprint": False,
+        "language": config.language,
+        "display_language": config.display_language,
+        "timezone": config.timezone,
+        "open_width": str(config.open_width),
+        "open_height": str(config.open_height),
+    }
+    mismatches: list[str] = []
+    if observed["core_type"].lower() != expected["core_type"].lower():
+        mismatches.append("core_type")
+    if _normalized_major(observed["core_version"]) != _normalized_major(expected["core_version"]):
+        mismatches.append("core_version")
+    for key in (
+        "os_name",
+        "os_version",
+        "web_rtc_mode",
+        "random_fingerprint",
+        "language",
+        "display_language",
+        "timezone",
+        "open_width",
+        "open_height",
+    ):
+        if observed[key] != expected[key]:
+            mismatches.append(key)
+    return {
+        "verified": not mismatches,
+        "policy": asdict(ROXY_FINGERPRINT_POLICY),
+        "expected": expected,
+        "observed": observed,
+        "mismatches": mismatches,
+        "generated_fields": {
+            "canvas_present": "canvas" in finger_info,
+            "audio_context_present": "audioContext" in finger_info,
+            "webgl_manufacturer_present": bool(finger_info.get("webGLManufacturer")),
+            "webgl_renderer_present": bool(finger_info.get("webGLRender")),
+            "hardware_concurrency_present": finger_info.get("hardwareConcurrent") not in (None, ""),
+            "device_memory_present": finger_info.get("deviceMemory") not in (None, ""),
+        },
+    }
+
+
+def _runtime_timezone_name(value: str) -> str:
+    parts = str(value or "").split(" ", 1)
+    return parts[1] if len(parts) == 2 else parts[0]
+
+
+def inspect_roxy_runtime_identity(cdp: Any, page: Any, config: RoxyCaptureConfig) -> dict[str, Any]:
+    """Verify non-network runtime identity fields without WebRTC/IP probing."""
+    browser_version = dict(cdp.send("Browser.getVersion") or {})
+    runtime = dict(
+        page.evaluate(
+            """() => ({
+                userAgent: navigator.userAgent,
+                platform: navigator.platform,
+                language: navigator.language,
+                languages: Array.from(navigator.languages || []),
+                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                screen: {
+                    width: screen.width,
+                    height: screen.height,
+                    availWidth: screen.availWidth,
+                    availHeight: screen.availHeight
+                },
+                window: {
+                    innerWidth: window.innerWidth,
+                    innerHeight: window.innerHeight,
+                    outerWidth: window.outerWidth,
+                    outerHeight: window.outerHeight
+                }
+            })"""
+        )
+        or {}
+    )
+    user_agent = str(runtime.get("userAgent") or "")
+    product = str(browser_version.get("product") or "")
+    platform = str(runtime.get("platform") or "")
+    window = _dict_value(runtime.get("window"))
+    observed = {
+        "browser_product": product,
+        "browser_protocol_version": str(browser_version.get("protocolVersion") or ""),
+        "user_agent": user_agent,
+        "platform": platform,
+        "language": str(runtime.get("language") or ""),
+        "languages": list(runtime.get("languages") or []),
+        "timezone": str(runtime.get("timezone") or ""),
+        "outer_width": int(window.get("outerWidth") or 0),
+        "outer_height": int(window.get("outerHeight") or 0),
+        "headless_ua": "HeadlessChrome/" in user_agent,
+    }
+    mismatches: list[str] = []
+    if _normalized_major(product) != config.core_version:
+        mismatches.append("browser_product")
+    if _normalized_major(user_agent) != config.core_version:
+        mismatches.append("user_agent")
+    if "mac" not in platform.lower():
+        mismatches.append("platform")
+    if observed["language"] != config.language:
+        mismatches.append("language")
+    if observed["timezone"] != _runtime_timezone_name(config.timezone):
+        mismatches.append("timezone")
+    if observed["outer_width"] != config.open_width:
+        mismatches.append("outer_width")
+    if observed["outer_height"] != config.open_height:
+        mismatches.append("outer_height")
+    if observed["headless_ua"]:
+        mismatches.append("headless_ua")
+    return {
+        "verified": not mismatches,
+        "policy": asdict(ROXY_FINGERPRINT_POLICY),
+        "observed": observed,
+        "mismatches": mismatches,
+        "screen": dict(runtime.get("screen") or {}),
+    }
+
+
 def load_roxy_capture_config(
     proxy_url: str | None = None,
     browser_profile: Mapping[str, object] | None = None,
@@ -741,6 +899,110 @@ class RoxyApiClient:
     def randomize_profile(self, workspace_id: int, dir_id: str) -> None:
         self.request("POST", "/browser/random_env", json={"workspaceId": workspace_id, "dirId": dir_id})
 
+    @staticmethod
+    def _profile_detail_row(payload: Mapping[str, Any], dir_id: str) -> dict[str, Any]:
+        data: Any = payload.get("data")
+        if not isinstance(data, dict):
+            return {}
+        rows = data.get("rows") or data.get("list") or data.get("records")
+        if isinstance(rows, list):
+            wanted = str(dir_id)
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                candidate = str(
+                    row.get("dirId")
+                    or row.get("dir_id")
+                    or row.get("profileId")
+                    or row.get("id")
+                    or ""
+                )
+                if candidate == wanted:
+                    return dict(row)
+            first = next((row for row in rows if isinstance(row, dict)), None)
+            return dict(first) if first is not None else {}
+        return dict(data)
+
+    def get_profile_detail(self, workspace_id: int, dir_id: str) -> dict[str, Any]:
+        payload = self.request(
+            "GET",
+            "/browser/detail",
+            params={"workspaceId": workspace_id, "dirId": dir_id},
+        )
+        return self._profile_detail_row(payload, dir_id)
+
+    def modify_profile(
+        self,
+        workspace_id: int,
+        dir_id: str,
+        values: Mapping[str, Any],
+    ) -> None:
+        payload = dict(values)
+        payload.update({"workspaceId": workspace_id, "dirId": dir_id})
+        self.request("POST", "/browser/mdf", json=payload)
+
+    def randomize_and_freeze_profile(
+        self,
+        workspace_id: int,
+        dir_id: str,
+    ) -> dict[str, Any]:
+        """Randomize Roxy noise fields, then freeze the shared identity policy."""
+        self.randomize_profile(workspace_id, dir_id)
+        before = self.get_profile_detail(workspace_id, dir_id)
+        if not before:
+            raise RoxyFingerprintError("ROXY_PROFILE_DETAIL_MISSING")
+        finger_info = _profile_finger_info(before)
+        finger_info.update(
+            {
+                "isLanguageBaseIp": self.config.follow_ip,
+                "language": self.config.language,
+                "isDisplayLanguageBaseIp": self.config.follow_ip,
+                "displayLanguage": self.config.display_language,
+                "isTimeZone": self.config.follow_ip,
+                "timeZone": self.config.timezone,
+                "openWidth": str(self.config.open_width),
+                "openHeight": str(self.config.open_height),
+                "resolutionType": True,
+                "resolutionX": str(self.config.screen_width),
+                "resolutionY": str(self.config.screen_height),
+                "webRTC": self.config.web_rtc_mode,
+                "randomFingerprint": False,
+                "syncTab": False,
+                "syncCookie": False,
+                "syncPassword": False,
+                "syncIndexedDb": False,
+                "syncLocalStorage": False,
+                "clearCacheFile": True,
+                "clearCookie": True,
+                "clearLocalStorage": True,
+                "forbidSavePassword": True,
+            }
+        )
+        values: dict[str, Any] = {
+            "coreType": self.config.core_type,
+            "coreVersion": self.config.core_version,
+            "os": self.config.os_name,
+            "osVersion": self.config.os_version,
+            "defaultOpenUrl": ["about:blank"],
+            "cookie": [],
+            "proxyInfo": _roxy_proxy_info(self.config.proxy_url),
+            "fingerInfo": finger_info,
+        }
+        for key in ("windowName", "windowRemark", "searchEngine"):
+            if key in before:
+                values[key] = before[key]
+        self.modify_profile(workspace_id, dir_id, values)
+        after = self.get_profile_detail(workspace_id, dir_id)
+        verification = _profile_policy_verification(after, self.config)
+        logger.info(
+            "Roxy profile policy verification dir_id={} verified={} mismatches={} generated_fields={}",
+            dir_id,
+            verification["verified"],
+            verification["mismatches"],
+            verification["generated_fields"],
+        )
+        return {"before": before, "after": after, "verification": verification}
+
     def open_profile(self, workspace_id: int, dir_id: str) -> dict[str, Any]:
         # Roxy 的 Local API 用 `headless` 字段控制无头模式。当前默认直接打开：
         # 不先 close，不强制 forceOpen；如需处理旧可见窗口复用，可通过环境变量
@@ -787,79 +1049,12 @@ class RoxyApiClient:
             json={"workspaceId": workspace_id, "dirIds": [dir_id], "isSoftDelete": False},
         )
 
-    def list_profiles(self, workspace_id: int) -> list[dict[str, Any]]:
-        resp = self.request(
-            "GET",
-            "/browser/list",
-            params={"workspaceId": workspace_id, "page": 1, "pageSize": 200},
-        )
-        return (resp.get("data") or {}).get("rows") or []
-
-    @staticmethod
-    def _is_paypal_auto_profile(profile: dict[str, Any]) -> bool:
-        name = str(profile.get("windowName") or "")
-        remark = str(profile.get("windowRemark") or "")
-        return name.startswith("paypal-fp-") or remark == "paypal runtime fingerprint capture"
-
-    def cleanup_paypal_auto_profiles(self, workspace_id: int) -> int:
-        deleted = 0
-        for profile in self.list_profiles(workspace_id):
-            if not self._is_paypal_auto_profile(profile):
-                continue
-            dir_id = str(profile.get("dirId") or profile.get("dir_id") or "").strip()
-            if not dir_id:
-                continue
-            try:
-                self.close_profile(dir_id)
-            except Exception as exc:
-                logger.debug("Roxy auto profile close skipped/failed for {}: {}", dir_id, exc)
-            try:
-                self.delete_profile(workspace_id, dir_id)
-                deleted += 1
-            except Exception as exc:
-                logger.debug("Roxy auto profile delete failed for {}: {}", dir_id, exc)
-        if deleted:
-            logger.info("Deleted {} stale paypal-fp Roxy profiles in workspace {}", deleted, workspace_id)
-        return deleted
-
     def create_or_reuse_profile(
         self, workspace_id: int, project_id: int | None
     ) -> str:
-        try:
-            return self.create_profile(workspace_id, project_id)
-        except RoxyFingerprintError as exc:
-            msg = str(exc)
-            quota_markers = ("超出", "额度不足", "limit", "quota", "insufficient", "not enough")
-            if not any(marker in msg.lower() for marker in quota_markers):
-                raise
-            deleted = self.cleanup_paypal_auto_profiles(workspace_id)
-            if deleted:
-                try:
-                    return self.create_profile(workspace_id, project_id)
-                except RoxyFingerprintError as retry_exc:
-                    logger.warning(
-                        "Roxy profile creation still failed after deleting stale auto profiles: {}",
-                        retry_exc,
-                    )
-            logger.warning(
-                "Roxy profile creation quota hit ({}), reusing existing profile",
-                exc,
-            )
-            for p in self.list_profiles(workspace_id):
-                profile_project_id = _first_int(
-                    p.get("projectId"),
-                    p.get("project_id"),
-                )
-                if project_id is not None and profile_project_id != project_id:
-                    continue
-                dir_id = (p.get("dirId") or p.get("dir_id") or "").strip()
-                if dir_id:
-                    logger.info("Reusing existing profile: {}", dir_id)
-                    return dir_id
-            raise RoxyFingerprintError(
-                f"Roxy workspace {workspace_id} project {project_id} 无可复用的已有窗口；"
-                "请释放一个窗口额度，或先在目标 project 中创建一个窗口"
-            )
+        # The run owns only the ID returned by this create call. Quota errors are
+        # propagated rather than enumerating, deleting, or reusing other Profiles.
+        return self.create_profile(workspace_id, project_id)
 
 
 def _sha256_hex(value: Any) -> str:
@@ -1673,6 +1868,7 @@ def _evaluate_cdp_fingerprint(
     cdp_info: dict[str, Any],
     timeout_ms: int,
     *,
+    config: RoxyCaptureConfig,
     close_browser: bool = True,
 ) -> dict[str, Any]:
     try:
@@ -1853,13 +2049,23 @@ async () => {
 """
     with sync_playwright() as p:
         browser = p.chromium.connect_over_cdp(endpoint, timeout=timeout_ms)
-        context = browser.contexts[0] if browser.contexts else browser.new_context()
-        page = context.pages[0] if context.pages else context.new_page()
-        page.goto("about:blank", wait_until="domcontentloaded", timeout=timeout_ms)
-        result = page.evaluate(script)
-        if close_browser:
-            browser.close()
-        return result
+        try:
+            context = browser.contexts[0] if browser.contexts else browser.new_context()
+            page = context.pages[0] if context.pages else context.new_page()
+            page.goto("about:blank", wait_until="domcontentloaded", timeout=timeout_ms)
+            cdp = context.new_cdp_session(page)
+            runtime_identity = inspect_roxy_runtime_identity(cdp, page, config)
+            if not runtime_identity.get("verified"):
+                raise RoxyFingerprintError(
+                    "ROXY_RUNTIME_FINGERPRINT_MISMATCH: "
+                    + ",".join(runtime_identity.get("mismatches") or [])
+                )
+            result = page.evaluate(script)
+            result["runtimeIdentity"] = runtime_identity
+            return result
+        finally:
+            if close_browser:
+                browser.close()
 
 
 def _runtime_to_profile(js: dict[str, Any], cdp_info: dict[str, Any]) -> dict[str, Any]:
@@ -1997,11 +2203,17 @@ def capture_roxy_runtime_profile(
     try:
         workspace_id, project_id = client.get_workspace_project()
         dir_id = client.create_or_reuse_profile(workspace_id, project_id)
-        client.randomize_profile(workspace_id, dir_id)
+        profile_freeze = client.randomize_and_freeze_profile(workspace_id, dir_id)
+        if not (profile_freeze.get("verification") or {}).get("verified"):
+            mismatches = (profile_freeze.get("verification") or {}).get("mismatches") or []
+            raise RoxyFingerprintError(
+                "ROXY_PROFILE_POLICY_MISMATCH: " + ",".join(str(item) for item in mismatches)
+            )
         cdp_info = client.open_profile(workspace_id, dir_id)
         js = _evaluate_cdp_fingerprint(
             cdp_info,
             timeout_ms=int(config.timeout_seconds * 1000),
+            config=config,
             close_browser=not keep_browser,
         )
         profile = _runtime_to_profile(js, cdp_info)
@@ -2036,6 +2248,8 @@ def capture_roxy_runtime_profile(
                 "proxy_url_hash": _proxy_url_hash(config.proxy_url),
                 "proxy_label": _redact_proxy_url(config.proxy_url) or "noproxy",
                 "created_for": "fingerprint",
+                "profile_verification": profile_freeze.get("verification") or {},
+                "runtime_verification": js.get("runtimeIdentity") or {},
             }
         return runtime
     finally:

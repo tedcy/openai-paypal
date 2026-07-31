@@ -33,6 +33,7 @@ from paypal.roxy_fingerprint import (
     _connect_over_cdp,
     _roxy_open_args,
     _roxy_profile_startup_args,
+    inspect_roxy_runtime_identity,
     load_roxy_capture_config,
 )
 from paypal.traffic_recorder import TrafficRecorder, clear_current_traffic_recorder, set_current_traffic_recorder
@@ -307,6 +308,8 @@ class BrowserSignupContext:
     stage_timing: dict[str, Any] = field(default_factory=dict)
     ui_generation: str = "unknown"
     fingerprint_policy: dict[str, Any] = field(default_factory=dict)
+    profile_freeze: dict[str, Any] = field(default_factory=dict)
+    runtime_fingerprint: dict[str, Any] = field(default_factory=dict)
 
 
 def classify_signup_ui(url: str) -> str:
@@ -763,7 +766,17 @@ class RoxySignupLab:
                     "cleanup_status": "pending",
                 },
             )
-            client.randomize_profile(config.workspace_id, profile_id)
+            profile_freeze = client.randomize_and_freeze_profile(config.workspace_id, profile_id)
+            context_result.profile_freeze = dict(profile_freeze.get("verification") or {})
+            _write_json(
+                self.capture_root / "browser" / "roxy_profile_detail.json",
+                {
+                    "before": profile_freeze.get("before") or {},
+                    "after": profile_freeze.get("after") or {},
+                },
+            )
+            if not context_result.profile_freeze.get("verified"):
+                raise RuntimeError("ROXY_PROFILE_POLICY_MISMATCH")
             cdp_info = client.open_profile(config.workspace_id, profile_id)
             endpoint = _connect_over_cdp(cdp_info)
             with sync_playwright() as playwright:
@@ -780,6 +793,13 @@ class RoxySignupLab:
                 cdp = browser_context.new_cdp_session(page)
                 capture = CdpCapture(cdp, self.capture_root / "browser", pause_signup=self.mode == "handoff")
                 capture.start()
+                context_result.runtime_fingerprint = inspect_roxy_runtime_identity(cdp, page, config)
+                _write_json(
+                    self.capture_root / "browser" / "runtime_fingerprint.json",
+                    context_result.runtime_fingerprint,
+                )
+                if not context_result.runtime_fingerprint.get("verified"):
+                    raise RuntimeError("ROXY_RUNTIME_FINGERPRINT_MISMATCH")
                 approval_url = f"https://www.paypal.com/agreements/approve?ba_token={self.ba_token}"
                 context_result.stages.append({"time": _utc_now(), "event": "approval_start"})
                 page.goto(approval_url, wait_until="domcontentloaded", timeout=45000)
@@ -881,6 +901,8 @@ class RoxySignupLab:
             "country": self.country_profile.country,
             "ui_generation": context_result.ui_generation,
             "fingerprint_policy": context_result.fingerprint_policy,
+            "profile_freeze": context_result.profile_freeze,
+            "runtime_fingerprint": context_result.runtime_fingerprint,
             "http_status": context_result.http_status,
             "classification": context_result.classification,
             "browser_transport": {
