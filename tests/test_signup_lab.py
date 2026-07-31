@@ -11,11 +11,15 @@ from paypal.signup_lab import (
     CdpCapture,
     RoxySignupLab,
     SignupLabInputs,
+    _approval_document_has_status,
     _configure_roxy_for_signup_lab,
+    _hash,
     audit_jsonl_capture,
     classify_signup_document,
     classify_signup_ui,
+    run_signup_lab_from_file,
 )
+from paypal.proxy import ProxyEntry
 from paypal.traffic_recorder import TrafficRecorder
 from tools.compare_paypal_traffic import compare
 
@@ -80,6 +84,134 @@ def test_signup_lab_inputs_route_bosnia_phone_and_proxy(tmp_path) -> None:
     assert lab.country_profile.language == "en-BA"
     assert lab.country_profile.timezone == "Europe/Sarajevo"
     assert lab.proxy_entry.username == "ba-user"
+
+
+def test_signup_lab_reserves_a_new_non_quarantined_proxy_for_each_profile(tmp_path) -> None:
+    source = tmp_path / "inputs.json"
+    first = "proxy-a.test:3010:user:password-a"
+    second = "proxy-b.test:3010:user:password-b"
+    third = "proxy-c.test:3010:user:password-c"
+    first_hash = _hash(ProxyEntry.parse(first).url)
+    source.write_text(
+        json.dumps(
+            {
+                "ba_tokens": ["BA-12345678ABCDEF"],
+                "phone": "+387644518746",
+                "proxies": [first, second, third],
+                "failed_proxy_hashes": [first_hash],
+                "next_proxy_index": 0,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    _, _, selected_one, reservation_one = SignupLabInputs.reserve_for_profile(source)
+    _, _, selected_two, reservation_two = SignupLabInputs.reserve_for_profile(source)
+
+    assert selected_one == second
+    assert reservation_one["selected_proxy_index"] == 1
+    assert reservation_one["next_proxy_index"] == 2
+    assert selected_two == third
+    assert reservation_two["selected_proxy_index"] == 2
+    assert json.loads(source.read_text(encoding="utf-8"))["next_proxy_index"] == 0
+
+
+def test_signup_lab_quarantines_approval_403_proxy_without_logging_credentials(
+    tmp_path, monkeypatch
+) -> None:
+    source = tmp_path / "inputs.json"
+    first = "proxy-a.test:3010:user:password-a"
+    second = "proxy-b.test:3010:user:password-b"
+    source.write_text(
+        json.dumps(
+            {
+                "ba_tokens": ["BA-12345678ABCDEF"],
+                "phone": "+387644518746",
+                "proxies": [first, second],
+                "next_proxy_index": 0,
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        RoxySignupLab,
+        "run",
+        lambda self: {
+            "status": "failed",
+            "browser_transport": {
+                "main_documents": [
+                    {"path": "/agreements/approve", "status": 403, "protocol": "http/1.1"}
+                ]
+            },
+        },
+    )
+    capture = tmp_path / "capture"
+
+    result = run_signup_lab_from_file(
+        mode="reference",
+        input_file=source,
+        capture_dir=capture,
+    )
+
+    first_hash = _hash(ProxyEntry.parse(first).url)
+    state = json.loads(source.read_text(encoding="utf-8"))
+    rotation_text = (capture / "proxy_rotation.json").read_text(encoding="utf-8")
+    assert state["next_proxy_index"] == 1
+    assert state["failed_proxy_hashes"] == [first_hash]
+    assert result["proxy_rotation"]["approval_403_quarantined"] is True
+    assert result["proxy_rotation"]["proxy_hash"] == first_hash
+    assert "password-a" not in rotation_text
+    assert "proxy-a.test" not in rotation_text
+
+
+def test_cold_protocol_does_not_advance_proxy_cursor(tmp_path, monkeypatch) -> None:
+    source = tmp_path / "inputs.json"
+    source.write_text(
+        json.dumps(
+            {
+                "ba_tokens": ["BA-12345678ABCDEF"],
+                "phone": "+387644518746",
+                "proxies": [
+                    "proxy-a.test:3010:user:password-a",
+                    "proxy-b.test:3010:user:password-b",
+                ],
+                "next_proxy_index": 1,
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "paypal.signup_lab.run_cold_protocol_signup",
+        lambda **kwargs: {"status": "failed"},
+    )
+
+    result = run_signup_lab_from_file(
+        mode="cold-protocol",
+        input_file=source,
+        capture_dir=tmp_path / "capture",
+    )
+
+    assert json.loads(source.read_text(encoding="utf-8"))["next_proxy_index"] == 1
+    assert result["proxy_rotation"]["cursor_advanced"] is False
+    assert result["proxy_rotation"]["reason"] == "cold_protocol_creates_no_roxy_profile"
+
+
+def test_approval_403_detection_is_scoped_to_the_approval_document() -> None:
+    assert _approval_document_has_status(
+        {
+            "browser_transport": {
+                "main_documents": [
+                    {"path": "/agreements/approve", "status": 403},
+                    {"path": "/captcha/", "status": 200},
+                ]
+            }
+        },
+        403,
+    )
+    assert not _approval_document_has_status(
+        {"browser_transport": {"main_documents": [{"path": "/asset.js", "status": 403}]}},
+        403,
+    )
 
 
 @pytest.mark.parametrize(

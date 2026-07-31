@@ -53,6 +53,7 @@ _INVALID_BA_MARKERS = (
     "expired ba token",
 )
 _SIGNUP_LAB_ROXY_API_TIMEOUT_SECONDS = 60.0
+_SIGNUP_LAB_INPUT_LOCK = threading.Lock()
 
 
 def _utc_now() -> str:
@@ -250,6 +251,7 @@ class SignupLabInputs:
     proxies: list[str]
     next_ba_index: int = 0
     next_proxy_index: int = 0
+    failed_proxy_hashes: set[str] = field(default_factory=set)
 
     @classmethod
     def load(cls, path: str | Path) -> "SignupLabInputs":
@@ -266,19 +268,88 @@ class SignupLabInputs:
             raise ValueError("signup lab input requires at least one proxy")
         for proxy in proxies:
             ProxyEntry.parse(proxy)
+        failed_proxy_hashes = {
+            str(value).strip().lower()
+            for value in data.get("failed_proxy_hashes", [])
+            if str(value).strip()
+        }
         return cls(
             ba_tokens=tokens,
             phone=phone,
             proxies=proxies,
             next_ba_index=int(data.get("next_ba_index") or 0) % len(tokens),
             next_proxy_index=int(data.get("next_proxy_index") or 0) % len(proxies),
+            failed_proxy_hashes=failed_proxy_hashes,
         )
 
+    def selected_proxy_index(self) -> int:
+        for offset in range(len(self.proxies)):
+            index = (self.next_proxy_index + offset) % len(self.proxies)
+            proxy_hash = _hash(ProxyEntry.parse(self.proxies[index]).url)
+            if proxy_hash not in self.failed_proxy_hashes:
+                return index
+        raise ValueError("signup lab proxy pool has no non-quarantined SID")
+
     def selection(self) -> tuple[str, str]:
+        proxy_index = self.selected_proxy_index()
         return (
             self.ba_tokens[self.next_ba_index % len(self.ba_tokens)],
-            self.proxies[self.next_proxy_index % len(self.proxies)],
+            self.proxies[proxy_index],
         )
+
+    @staticmethod
+    def _write_state(source: Path, data: Mapping[str, Any]) -> None:
+        temporary = source.with_name(
+            f".{source.name}.{os.getpid()}.{time.time_ns()}.tmp"
+        )
+        try:
+            temporary.write_text(
+                json.dumps(data, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            os.replace(temporary, source)
+        finally:
+            if temporary.exists():
+                temporary.unlink()
+
+    @classmethod
+    def reserve_for_profile(
+        cls,
+        path: str | Path,
+    ) -> tuple["SignupLabInputs", str, str, dict[str, Any]]:
+        source = Path(path).expanduser().resolve()
+        with _SIGNUP_LAB_INPUT_LOCK:
+            inputs = cls.load(source)
+            proxy_index = inputs.selected_proxy_index()
+            ba_token = inputs.ba_tokens[inputs.next_ba_index % len(inputs.ba_tokens)]
+            proxy_line = inputs.proxies[proxy_index]
+            next_proxy_index = (proxy_index + 1) % len(inputs.proxies)
+            data = json.loads(source.read_text(encoding="utf-8-sig"))
+            data["next_proxy_index"] = next_proxy_index
+            cls._write_state(source, data)
+        return inputs, ba_token, proxy_line, {
+            "selected_proxy_index": proxy_index,
+            "next_proxy_index": next_proxy_index,
+            "proxy_hash": _hash(ProxyEntry.parse(proxy_line).url),
+            "quarantined_proxy_count": len(inputs.failed_proxy_hashes),
+        }
+
+    @classmethod
+    def quarantine_proxy(cls, path: str | Path, proxy_line: str) -> tuple[str, bool]:
+        source = Path(path).expanduser().resolve()
+        proxy_hash = _hash(ProxyEntry.parse(proxy_line).url)
+        with _SIGNUP_LAB_INPUT_LOCK:
+            data = json.loads(source.read_text(encoding="utf-8-sig"))
+            failed = {
+                str(value).strip().lower()
+                for value in data.get("failed_proxy_hashes", [])
+                if str(value).strip()
+            }
+            added = proxy_hash not in failed
+            failed.add(proxy_hash)
+            data["failed_proxy_hashes"] = sorted(failed)
+            cls._write_state(source, data)
+        return proxy_hash, added
 
 
 @dataclass(slots=True)
@@ -925,6 +996,37 @@ def default_capture_root(mode: str) -> Path:
     return Path.cwd() / "captures" / "signup-lab" / f"{stamp}-{mode}"
 
 
+def _approval_document_has_status(result: Mapping[str, Any], status: int) -> bool:
+    transport = result.get("browser_transport")
+    if not isinstance(transport, Mapping):
+        return False
+    documents = transport.get("main_documents")
+    if not isinstance(documents, list):
+        return False
+    return any(
+        isinstance(document, Mapping)
+        and str(document.get("path") or "").rstrip("/") == "/agreements/approve"
+        and int(document.get("status") or 0) == status
+        for document in documents
+    )
+
+
+def _persist_proxy_rotation(
+    root: Path,
+    result: dict[str, Any],
+    rotation: Mapping[str, Any],
+) -> None:
+    safe_rotation = dict(rotation)
+    result["proxy_rotation"] = safe_rotation
+    _write_json(root / "proxy_rotation.json", safe_rotation)
+    checkpoint = root / "checkpoint.json"
+    if checkpoint.is_file():
+        value = json.loads(checkpoint.read_text(encoding="utf-8-sig"))
+        if isinstance(value, dict):
+            value["proxy_rotation"] = safe_rotation
+            _write_json(checkpoint, value)
+
+
 def run_signup_lab_from_file(
     *,
     mode: str,
@@ -933,34 +1035,67 @@ def run_signup_lab_from_file(
     protocol_transport: str = "httpx",
     keep_profile: bool = False,
 ) -> dict[str, Any]:
-    inputs = SignupLabInputs.load(input_file)
-    ba_token, proxy = inputs.selection()
+    if mode == "cold-protocol":
+        inputs = SignupLabInputs.load(input_file)
+        ba_token, proxy = inputs.selection()
+        proxy_index = inputs.selected_proxy_index()
+        rotation: dict[str, Any] = {
+            "selected_proxy_index": proxy_index,
+            "next_proxy_index": inputs.next_proxy_index,
+            "proxy_hash": _hash(ProxyEntry.parse(proxy).url),
+            "quarantined_proxy_count": len(inputs.failed_proxy_hashes),
+            "cursor_advanced": False,
+            "reason": "cold_protocol_creates_no_roxy_profile",
+        }
+    else:
+        inputs, ba_token, proxy, rotation = SignupLabInputs.reserve_for_profile(input_file)
+        rotation["cursor_advanced"] = True
+        rotation["reason"] = "reserved_for_new_roxy_profile"
     root = Path(capture_dir).expanduser().resolve() if capture_dir else default_capture_root(mode).resolve()
     logger.info(
-        "Signup lab start mode={} country={} ba_hash={} proxy_hash={} capture={}",
+        "Signup lab start mode={} country={} ba_hash={} proxy_hash={} proxy_slot={} "
+        "next_proxy_slot={} quarantined={} capture={}",
         mode,
         profile_for_phone(inputs.phone).country,
         _hash(ba_token),
         _hash(ProxyEntry.parse(proxy).url),
+        rotation["selected_proxy_index"],
+        rotation["next_proxy_index"],
+        rotation["quarantined_proxy_count"],
         root,
     )
     if mode == "cold-protocol":
-        return run_cold_protocol_signup(
+        result = run_cold_protocol_signup(
             ba_token=ba_token,
             phone=inputs.phone,
             proxy_line=proxy,
             capture_root=root,
             protocol_transport=protocol_transport,
         )
-    return RoxySignupLab(
-        mode=mode,
-        ba_token=ba_token,
-        phone=inputs.phone,
-        proxy_line=proxy,
-        capture_root=root,
-        protocol_transport=protocol_transport,
-        keep_profile=keep_profile,
-    ).run()
+    else:
+        result = RoxySignupLab(
+            mode=mode,
+            ba_token=ba_token,
+            phone=inputs.phone,
+            proxy_line=proxy,
+            capture_root=root,
+            protocol_transport=protocol_transport,
+            keep_profile=keep_profile,
+        ).run()
+        if _approval_document_has_status(result, 403):
+            proxy_hash, added = SignupLabInputs.quarantine_proxy(input_file, proxy)
+            rotation["approval_403_quarantined"] = True
+            rotation["quarantine_added"] = added
+            rotation["proxy_hash"] = proxy_hash
+            logger.warning(
+                "Signup lab approval 403 quarantined proxy SID hash={} next_proxy_slot={}",
+                proxy_hash,
+                rotation["next_proxy_index"],
+            )
+        else:
+            rotation["approval_403_quarantined"] = False
+    _persist_proxy_rotation(root, result, rotation)
+    return result
 
 
 def run_cold_protocol_signup(
