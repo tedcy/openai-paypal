@@ -54,6 +54,12 @@ _INVALID_BA_MARKERS = (
 )
 _SIGNUP_LAB_ROXY_API_TIMEOUT_SECONDS = 60.0
 _SIGNUP_LAB_INPUT_LOCK = threading.Lock()
+_EXISTING_PROFILE_CLEAR_ORIGINS = (
+    "https://www.paypal.com",
+    "https://paypal.com",
+    "https://www.paypalobjects.com",
+    "https://paypalobjects.com",
+)
 
 
 def _utc_now() -> str:
@@ -369,6 +375,10 @@ class BrowserSignupContext:
     workspace_id: int = 0
     project_id: int = 0
     profile_id: str = ""
+    profile_source: str = "created"
+    profile_detail: dict[str, Any] = field(default_factory=dict)
+    state_reset: dict[str, Any] = field(default_factory=dict)
+    profile_cleanup: str = "pending"
     profile_retained: bool = False
     same_context_page: bool = True
     browser_create_args: list[str] = field(default_factory=list)
@@ -555,6 +565,8 @@ class RoxySignupLab:
         keep_profile: bool = False,
         window_hold_seconds: float = 0.0,
         warmup: bool = False,
+        existing_profile_id: str = "",
+        existing_profile_name: str = "",
     ):
         if mode not in {"reference", "handoff"}:
             raise ValueError(f"unsupported Roxy signup lab mode: {mode}")
@@ -568,6 +580,14 @@ class RoxySignupLab:
         self.keep_profile = keep_profile
         self.window_hold_seconds = max(0.0, min(float(window_hold_seconds), 3600.0))
         self.warmup = bool(warmup)
+        self.existing_profile_id = str(existing_profile_id or "").strip()
+        self.existing_profile_name = str(existing_profile_name or "").strip()
+        if self.existing_profile_id and mode != "reference":
+            raise ValueError("existing Roxy Profile is supported only in reference mode")
+        if self.existing_profile_name and not self.existing_profile_id:
+            raise ValueError("existing Roxy Profile name verification requires an explicit Profile ID")
+        if self.existing_profile_id and self.warmup:
+            raise ValueError("clean existing-Profile reference cannot also use warm-up state")
 
     def _click_first(self, page: Any, labels: tuple[str, ...]) -> bool:
         for label in labels:
@@ -940,7 +960,11 @@ class RoxySignupLab:
 
         self.capture_root.mkdir(parents=True, exist_ok=True)
         profile = browser_profile_for(self.country_profile, BROWSER_PROFILE)
-        config = load_roxy_capture_config(proxy_url=self.proxy_entry.url, browser_profile=profile)
+        existing_control = bool(self.existing_profile_id)
+        config = load_roxy_capture_config(
+            proxy_url="" if existing_control else self.proxy_entry.url,
+            browser_profile=profile,
+        )
         _configure_roxy_for_signup_lab(config)
         if config.workspace_id is None or config.project_id is None:
             raise RoxyFingerprintError("signup lab requires fixed PAYPAL_ROXY_WORKSPACE_ID and PAYPAL_ROXY_PROJECT_ID")
@@ -948,27 +972,60 @@ class RoxySignupLab:
         context_result = BrowserSignupContext(
             workspace_id=config.workspace_id,
             project_id=config.project_id,
-            fingerprint_policy=asdict(ROXY_FINGERPRINT_POLICY),
-            browser_force_open_requested=bool(config.force_open),
+            profile_source="existing_clean_control" if existing_control else "created",
+            fingerprint_policy=(
+                {"source": "existing_profile_preserved"}
+                if existing_control
+                else asdict(ROXY_FINGERPRINT_POLICY)
+            ),
+            browser_force_open_requested=(False if existing_control else bool(config.force_open)),
             window_hold_seconds=self.window_hold_seconds,
         )
-        context_result.browser_create_args = _roxy_profile_startup_args(
-            config.proxy_url,
-            open_width=config.open_width,
-            open_height=config.open_height,
-        )
-        context_result.browser_open_args = _roxy_open_args(
-            config.proxy_url,
-            open_width=config.open_width,
-            open_height=config.open_height,
-        )
+        if not existing_control:
+            context_result.browser_create_args = _roxy_profile_startup_args(
+                config.proxy_url,
+                open_width=config.open_width,
+                open_height=config.open_height,
+            )
+            context_result.browser_open_args = _roxy_open_args(
+                config.proxy_url,
+                open_width=config.open_width,
+                open_height=config.open_height,
+            )
         context_result.http2_disabled_requested = "--disable-http2" in context_result.browser_open_args
         profile_id = ""
         succeeded = False
         browser = None
         capture: CdpCapture | None = None
         try:
-            profile_id = client.create_profile(config.workspace_id, config.project_id)
+            if existing_control:
+                profile_id = self.existing_profile_id
+                detail = client.get_profile_detail(config.workspace_id, profile_id)
+                if not detail:
+                    raise RuntimeError("ROXY_EXISTING_PROFILE_DETAIL_MISSING")
+                if self.existing_profile_name and str(detail.get("windowName") or "") != self.existing_profile_name:
+                    raise RuntimeError("ROXY_EXISTING_PROFILE_NAME_MISMATCH")
+                if not _profile_default_urls_are_blank(detail):
+                    raise RuntimeError("ROXY_EXISTING_PROFILE_DEFAULT_URL_NOT_BLANK")
+                context_result.profile_detail = _safe_existing_profile_detail(
+                    detail,
+                    expected_name=self.existing_profile_name,
+                )
+                _write_json(
+                    self.capture_root / "browser" / "roxy_existing_profile_detail.json",
+                    detail,
+                )
+                try:
+                    client.close_profile(profile_id)
+                    context_result.profile_cleanup = "closed_before_clean_control"
+                except Exception as exc:
+                    context_result.state_reset["preopen_close_error_type"] = type(exc).__name__
+                cdp_info = client.open_existing_profile_preserving_settings(
+                    config.workspace_id,
+                    profile_id,
+                )
+            else:
+                profile_id = client.create_profile(config.workspace_id, config.project_id)
             context_result.profile_id = profile_id
             _write_json(
                 self.capture_root / "roxy_profile.json",
@@ -976,22 +1033,24 @@ class RoxySignupLab:
                     "workspace_id": config.workspace_id,
                     "project_id": config.project_id,
                     "profile_id": profile_id,
-                    "created_at": _utc_now(),
+                    "profile_source": context_result.profile_source,
+                    "recorded_at": _utc_now(),
                     "cleanup_status": "pending",
                 },
             )
-            profile_freeze = client.randomize_and_freeze_profile(config.workspace_id, profile_id)
-            context_result.profile_freeze = dict(profile_freeze.get("verification") or {})
-            _write_json(
-                self.capture_root / "browser" / "roxy_profile_detail.json",
-                {
-                    "before": profile_freeze.get("before") or {},
-                    "after": profile_freeze.get("after") or {},
-                },
-            )
-            if not context_result.profile_freeze.get("verified"):
-                raise RuntimeError("ROXY_PROFILE_POLICY_MISMATCH")
-            cdp_info = client.open_profile(config.workspace_id, profile_id)
+            if not existing_control:
+                profile_freeze = client.randomize_and_freeze_profile(config.workspace_id, profile_id)
+                context_result.profile_freeze = dict(profile_freeze.get("verification") or {})
+                _write_json(
+                    self.capture_root / "browser" / "roxy_profile_detail.json",
+                    {
+                        "before": profile_freeze.get("before") or {},
+                        "after": profile_freeze.get("after") or {},
+                    },
+                )
+                if not context_result.profile_freeze.get("verified"):
+                    raise RuntimeError("ROXY_PROFILE_POLICY_MISMATCH")
+                cdp_info = client.open_profile(config.workspace_id, profile_id)
             endpoint = _connect_over_cdp(cdp_info)
             with sync_playwright() as playwright:
                 browser = playwright.chromium.connect_over_cdp(endpoint, timeout=int(config.timeout_seconds * 1000))
@@ -1005,6 +1064,13 @@ class RoxySignupLab:
                     if stale is not page:
                         stale.close()
                 cdp = browser_context.new_cdp_session(page)
+                if existing_control:
+                    clear_existing_profile_state(
+                        cdp,
+                        browser_context,
+                        page,
+                        context_result,
+                    )
                 capture = CdpCapture(cdp, self.capture_root / "browser", pause_signup=self.mode == "handoff")
                 capture.start()
                 context_result.runtime_fingerprint = inspect_roxy_runtime_identity(cdp, page, config)
@@ -1012,7 +1078,8 @@ class RoxySignupLab:
                     self.capture_root / "browser" / "runtime_fingerprint.json",
                     context_result.runtime_fingerprint,
                 )
-                self._require_runtime_identity(page, context_result)
+                if not existing_control:
+                    self._require_runtime_identity(page, context_result)
                 if self.warmup:
                     self._warm_up_same_page(page, context_result)
                 approval_url = f"https://www.paypal.com/agreements/approve?ba_token={self.ba_token}"
@@ -1080,8 +1147,29 @@ class RoxySignupLab:
                         "error": "CAPTURE_INTEGRITY_FAILED",
                     }
                     succeeded = False
-            should_delete = bool(profile_id and succeeded and not self.keep_profile)
-            if should_delete:
+            should_delete = bool(
+                profile_id and succeeded and not self.keep_profile and not existing_control
+            )
+            if existing_control and profile_id:
+                try:
+                    client.close_profile(profile_id)
+                    context_result.profile_cleanup = "closed_not_deleted"
+                except Exception as exc:
+                    context_result.profile_cleanup = "close_failed_not_deleted"
+                    context_result.classification["cleanup_error_type"] = type(exc).__name__
+                context_result.profile_retained = True
+                _write_json(
+                    self.capture_root / "roxy_profile.json",
+                    {
+                        "workspace_id": config.workspace_id,
+                        "project_id": config.project_id,
+                        "profile_id": profile_id,
+                        "profile_source": context_result.profile_source,
+                        "cleanup_status": context_result.profile_cleanup,
+                        "cleaned_at": _utc_now(),
+                    },
+                )
+            elif should_delete:
                 try:
                     client.close_profile(profile_id)
                 except Exception:
@@ -1098,11 +1186,14 @@ class RoxySignupLab:
                             "cleaned_at": _utc_now(),
                         },
                     )
+                    context_result.profile_cleanup = "deleted"
                 except Exception as exc:
                     context_result.profile_retained = True
+                    context_result.profile_cleanup = "delete_failed"
                     context_result.classification["cleanup_error"] = str(exc)
             elif profile_id:
                 context_result.profile_retained = True
+                context_result.profile_cleanup = "retained"
             client.close()
 
         if capture is not None:
@@ -1114,12 +1205,18 @@ class RoxySignupLab:
         safe = {
             "status": context_result.status,
             "ba_hash": _hash(self.ba_token),
-            "proxy_hash": _hash(self.proxy_entry.url),
+            "proxy_hash": "" if existing_control else _hash(self.proxy_entry.url),
+            "proxy_source": "existing_profile_preserved" if existing_control else "input_pool",
             "country": self.country_profile.country,
             "ui_generation": context_result.ui_generation,
+            "profile_source": context_result.profile_source,
+            "profile_hash": _hash(context_result.profile_id),
+            "profile_detail": context_result.profile_detail,
+            "profile_cleanup": context_result.profile_cleanup,
             "fingerprint_policy": context_result.fingerprint_policy,
             "profile_freeze": context_result.profile_freeze,
             "runtime_fingerprint": context_result.runtime_fingerprint,
+            "state_reset": context_result.state_reset,
             "warmup": context_result.warmup,
             "http_status": context_result.http_status,
             "classification": context_result.classification,
@@ -1164,6 +1261,135 @@ def _approval_document_has_status(result: Mapping[str, Any], status: int) -> boo
     )
 
 
+def _safe_existing_profile_detail(
+    detail: Mapping[str, Any],
+    *,
+    expected_name: str = "",
+) -> dict[str, Any]:
+    """Return only non-secret fields needed for the control comparison."""
+    user_agent = str(detail.get("userAgent") or detail.get("user_agent") or "")
+    match = re.search(r"(?:Chrome|Chromium|RoxyChrome)/(\d+)", user_agent, re.I)
+    default_urls = detail.get("defaultOpenUrl") or []
+    if isinstance(default_urls, str):
+        default_urls = [default_urls]
+    proxy_info = detail.get("proxyInfo")
+    proxy_info = dict(proxy_info) if isinstance(proxy_info, Mapping) else {}
+    profile_name = str(detail.get("windowName") or "")
+    return {
+        "core_version": str(detail.get("coreVersion") or ""),
+        "os": str(detail.get("os") or ""),
+        "os_version": str(detail.get("osVersion") or ""),
+        "user_agent_major": match.group(1) if match else "",
+        "user_agent_hash": _hash(user_agent),
+        "profile_name_hash": _hash(profile_name),
+        "expected_name_verified": bool(expected_name and profile_name == expected_name),
+        "default_open_url_count": len(default_urls),
+        "finger_info_exposed": isinstance(detail.get("fingerInfo"), (dict, str)),
+        "proxy_category": str(
+            proxy_info.get("proxyCategory") or proxy_info.get("protocol") or "unknown"
+        ),
+        "proxy_authenticated": bool(
+            proxy_info.get("proxyUserName") or proxy_info.get("proxyPassword")
+        ),
+    }
+
+
+def _profile_default_urls_are_blank(detail: Mapping[str, Any]) -> bool:
+    values = detail.get("defaultOpenUrl") or []
+    if isinstance(values, str):
+        values = [values]
+    if not isinstance(values, list):
+        return False
+    allowed = {"", "about:blank", "chrome://newtab/", "chrome://new-tab-page/"}
+    return all(str(value or "").strip().lower() in allowed for value in values)
+
+
+def clear_existing_profile_state(
+    cdp: Any,
+    browser_context: Any,
+    page: Any,
+    context: BrowserSignupContext,
+) -> dict[str, Any]:
+    """Clear all reusable browser state before the first target navigation."""
+    context.stages.append({"time": _utc_now(), "event": "existing_profile_state_reset_start"})
+    page.goto("about:blank", wait_until="commit", timeout=15000)
+
+    failures: list[str] = []
+
+    def send_required(method: str, params: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        try:
+            value = cdp.send(method, dict(params or {}))
+            return dict(value or {})
+        except Exception as exc:
+            failures.append(f"{method}:{type(exc).__name__}")
+            return {}
+
+    send_required("Network.enable")
+    before = send_required("Network.getAllCookies").get("cookies") or []
+    try:
+        browser_context.clear_cookies()
+    except Exception as exc:
+        failures.append(f"BrowserContext.clear_cookies:{type(exc).__name__}")
+    send_required("Network.clearBrowserCookies")
+    send_required("Network.clearBrowserCache")
+    for origin in _EXISTING_PROFILE_CLEAR_ORIGINS:
+        send_required(
+            "Storage.clearDataForOrigin",
+            {"origin": origin, "storageTypes": "all"},
+        )
+        for is_local in (True, False):
+            try:
+                cdp.send(
+                    "DOMStorage.clear",
+                    {
+                        "storageId": {
+                            "securityOrigin": origin,
+                            "isLocalStorage": is_local,
+                        }
+                    },
+                )
+            except Exception:
+                # Storage.clearDataForOrigin is the required operation; this is
+                # a compatibility fallback for Chromium builds that expose the
+                # DOMStorage domain separately.
+                pass
+    try:
+        cdp.send("ServiceWorker.enable")
+        cdp.send("ServiceWorker.stopAllWorkers")
+    except Exception:
+        pass
+    after = send_required("Network.getAllCookies").get("cookies") or []
+    result = {
+        "requested": True,
+        "page_before_target": "about:blank",
+        "cookies_before_count": len(before),
+        "cookies_after_count": len(after),
+        "http_cache_cleared": not any(
+            item.startswith("Network.clearBrowserCache:") for item in failures
+        ),
+        "browser_cookies_cleared": not any(
+            item.startswith(("Network.clearBrowserCookies:", "BrowserContext.clear_cookies:"))
+            for item in failures
+        ),
+        "origins_cleared": len(_EXISTING_PROFILE_CLEAR_ORIGINS),
+        "failures": failures,
+        "verified": not failures and not after,
+    }
+    context.state_reset = result
+    context.stages.append(
+        {
+            "time": _utc_now(),
+            "event": "existing_profile_state_reset_complete",
+            "verified": result["verified"],
+            "cookies_before_count": len(before),
+            "cookies_after_count": len(after),
+        }
+    )
+    if not result["verified"]:
+        raise RuntimeError("ROXY_EXISTING_PROFILE_STATE_RESET_FAILED")
+    return result
+
+
 def _persist_proxy_rotation(
     root: Path,
     result: dict[str, Any],
@@ -1189,18 +1415,27 @@ def run_signup_lab_from_file(
     keep_profile: bool = False,
     window_hold_seconds: float = 0.0,
     warmup: bool = False,
+    existing_profile_id: str = "",
+    existing_profile_name: str = "",
 ) -> dict[str, Any]:
-    if mode == "cold-protocol":
+    existing_control = bool(str(existing_profile_id or "").strip())
+    if existing_control and mode != "reference":
+        raise ValueError("existing Roxy Profile is supported only in reference mode")
+    if mode == "cold-protocol" or existing_control:
         inputs = SignupLabInputs.load(input_file)
         ba_token, proxy = inputs.selection()
         proxy_index = inputs.selected_proxy_index()
         rotation: dict[str, Any] = {
             "selected_proxy_index": proxy_index,
             "next_proxy_index": inputs.next_proxy_index,
-            "proxy_hash": _hash(ProxyEntry.parse(proxy).url),
+            "proxy_hash": "" if existing_control else _hash(ProxyEntry.parse(proxy).url),
             "quarantined_proxy_count": len(inputs.failed_proxy_hashes),
             "cursor_advanced": False,
-            "reason": "cold_protocol_creates_no_roxy_profile",
+            "reason": (
+                "existing_profile_control_uses_persisted_proxy"
+                if existing_control
+                else "cold_protocol_creates_no_roxy_profile"
+            ),
         }
     else:
         inputs, ba_token, proxy, rotation = SignupLabInputs.reserve_for_profile(input_file)
@@ -1213,7 +1448,7 @@ def run_signup_lab_from_file(
         mode,
         profile_for_phone(inputs.phone).country,
         _hash(ba_token),
-        _hash(ProxyEntry.parse(proxy).url),
+        "existing-profile" if existing_control else _hash(ProxyEntry.parse(proxy).url),
         rotation["selected_proxy_index"],
         rotation["next_proxy_index"],
         rotation["quarantined_proxy_count"],
@@ -1238,8 +1473,12 @@ def run_signup_lab_from_file(
             keep_profile=keep_profile,
             window_hold_seconds=window_hold_seconds,
             warmup=warmup,
+            existing_profile_id=existing_profile_id,
+            existing_profile_name=existing_profile_name,
         ).run()
-        if _approval_document_has_status(result, 403):
+        if existing_control:
+            rotation["approval_403_quarantined"] = False
+        elif _approval_document_has_status(result, 403):
             proxy_hash, added = SignupLabInputs.quarantine_proxy(input_file, proxy)
             rotation["approval_403_quarantined"] = True
             rotation["quarantine_added"] = added

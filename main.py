@@ -89,6 +89,19 @@ def main():
         help="Use the same Roxy Page to establish first-party browser state before approval",
     )
     parser.add_argument(
+        "--signup-lab-existing-profile-id",
+        default="",
+        help=(
+            "Use one explicit existing Roxy Profile as a clean reference: preserve its "
+            "settings, clear browser state before the target request, and never delete it"
+        ),
+    )
+    parser.add_argument(
+        "--signup-lab-existing-profile-name",
+        default="",
+        help="Optional exact name check for --signup-lab-existing-profile-id",
+    )
+    parser.add_argument(
         "--phone",
         default="",
         help="E.164 phone; supported prefixes: +55, +66, +387 and +1"
@@ -218,6 +231,8 @@ def main():
             keep_profile=args.keep_roxy_profile,
             window_hold_seconds=args.roxy_window_hold_seconds,
             warmup=args.signup_lab_warmup,
+            existing_profile_id=args.signup_lab_existing_profile_id,
+            existing_profile_name=args.signup_lab_existing_profile_name,
         )
         print(json.dumps(sanitize_for_log(result), indent=2, ensure_ascii=False))
         sys.exit(0 if result.get("status") in {"browser_signup_ready", "protocol_signup_ready"} else 1)

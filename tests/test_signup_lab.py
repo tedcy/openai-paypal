@@ -17,6 +17,7 @@ from paypal.signup_lab import (
     audit_jsonl_capture,
     classify_signup_document,
     classify_signup_ui,
+    clear_existing_profile_state,
     run_signup_lab_from_file,
 )
 from paypal.proxy import ProxyEntry
@@ -194,6 +195,60 @@ def test_cold_protocol_does_not_advance_proxy_cursor(tmp_path, monkeypatch) -> N
     assert json.loads(source.read_text(encoding="utf-8"))["next_proxy_index"] == 1
     assert result["proxy_rotation"]["cursor_advanced"] is False
     assert result["proxy_rotation"]["reason"] == "cold_protocol_creates_no_roxy_profile"
+
+
+def test_existing_profile_control_does_not_reserve_or_quarantine_proxy(
+    tmp_path, monkeypatch
+) -> None:
+    source = tmp_path / "inputs.json"
+    source.write_text(
+        json.dumps(
+            {
+                "ba_tokens": ["BA-12345678ABCDEF"],
+                "phone": "+387644518746",
+                "proxies": [
+                    "proxy-a.test:3010:user:password-a",
+                    "proxy-b.test:3010:user:password-b",
+                ],
+                "next_proxy_index": 1,
+            }
+        ),
+        encoding="utf-8",
+    )
+    observed = {}
+
+    def fake_run(self):
+        observed["profile_id"] = self.existing_profile_id
+        observed["profile_name"] = self.existing_profile_name
+        return {
+            "status": "failed",
+            "browser_transport": {
+                "main_documents": [
+                    {"path": "/agreements/approve", "status": 403}
+                ]
+            },
+        }
+
+    monkeypatch.setattr(RoxySignupLab, "run", fake_run)
+
+    result = run_signup_lab_from_file(
+        mode="reference",
+        input_file=source,
+        capture_dir=tmp_path / "capture",
+        existing_profile_id="explicit-profile-id",
+        existing_profile_name="test",
+    )
+
+    state = json.loads(source.read_text(encoding="utf-8"))
+    assert state["next_proxy_index"] == 1
+    assert "failed_proxy_hashes" not in state
+    assert observed == {
+        "profile_id": "explicit-profile-id",
+        "profile_name": "test",
+    }
+    assert result["proxy_rotation"]["cursor_advanced"] is False
+    assert result["proxy_rotation"]["approval_403_quarantined"] is False
+    assert result["proxy_rotation"]["reason"] == "existing_profile_control_uses_persisted_proxy"
 
 
 def test_approval_403_detection_is_scoped_to_the_approval_document() -> None:
@@ -593,6 +648,67 @@ def test_same_page_warmup_stops_on_terminal_challenge() -> None:
 
     assert context.challenge_markers == ["warmup_challenged"]
     assert context.warmup["cookie_names"] == ["datadome"]
+
+
+def test_existing_profile_state_reset_clears_every_store_before_target() -> None:
+    calls = []
+
+    class Cdp:
+        cookie_reads = 0
+
+        def send(self, method, params=None):
+            calls.append((method, params or {}))
+            if method == "Network.getAllCookies":
+                self.cookie_reads += 1
+                if self.cookie_reads == 1:
+                    return {"cookies": [{"name": "stale", "value": "secret"}]}
+                return {"cookies": []}
+            return {}
+
+    class BrowserContext:
+        def clear_cookies(self):
+            calls.append(("BrowserContext.clear_cookies", {}))
+
+    class Page:
+        def goto(self, url, **kwargs):
+            calls.append(("Page.goto", {"url": url, **kwargs}))
+
+    context = BrowserSignupContext()
+    result = clear_existing_profile_state(Cdp(), BrowserContext(), Page(), context)
+
+    methods = [method for method, _ in calls]
+    assert methods[0] == "Page.goto"
+    assert "Network.clearBrowserCookies" in methods
+    assert "Network.clearBrowserCache" in methods
+    assert methods.count("Storage.clearDataForOrigin") == 4
+    assert methods.count("DOMStorage.clear") == 8
+    assert result["cookies_before_count"] == 1
+    assert result["cookies_after_count"] == 0
+    assert result["verified"] is True
+    assert context.stages[-1]["event"] == "existing_profile_state_reset_complete"
+
+
+def test_existing_profile_state_reset_rejects_remaining_cookie() -> None:
+    class Cdp:
+        def send(self, method, params=None):
+            if method == "Network.getAllCookies":
+                return {"cookies": [{"name": "still-present"}]}
+            return {}
+
+    class BrowserContext:
+        def clear_cookies(self):
+            return None
+
+    class Page:
+        def goto(self, url, **kwargs):
+            return None
+
+    context = BrowserSignupContext()
+    with pytest.raises(RuntimeError, match="ROXY_EXISTING_PROFILE_STATE_RESET_FAILED"):
+        clear_existing_profile_state(Cdp(), BrowserContext(), Page(), context)
+
+    assert context.state_reset["verified"] is False
+    assert context.state_reset["cookies_after_count"] == 1
 
 
 def test_failure_screenshot_is_best_effort_with_short_timeout(tmp_path) -> None:

@@ -140,6 +140,29 @@ def test_open_profile_sends_disable_http2_for_proxy() -> None:
     assert calls[0][2]["json"]["headless"] is False
 
 
+def test_open_existing_profile_preserves_persisted_launch_settings() -> None:
+    client = RoxyApiClient.__new__(RoxyApiClient)
+    calls: list[tuple[str, str, dict]] = []
+    client.request = lambda method, path, **kwargs: (
+        calls.append((method, path, kwargs))
+        or {"data": {"ws": "ws://127.0.0.1/devtools/browser/test"}}
+    )
+
+    client.open_existing_profile_preserving_settings(123, "test-profile-id")
+
+    assert calls == [
+        (
+            "POST",
+            "/browser/open",
+            {"json": {"workspaceId": 123, "dirId": "test-profile-id"}},
+        )
+    ]
+    payload = calls[0][2]["json"]
+    assert "args" not in payload
+    assert "headless" not in payload
+    assert "forceOpen" not in payload
+
+
 def test_randomize_and_freeze_preserves_roxy_noise_and_reapplies_policy() -> None:
     client = RoxyApiClient.__new__(RoxyApiClient)
     client.config = RoxyCaptureConfig(

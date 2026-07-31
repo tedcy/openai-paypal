@@ -1258,6 +1258,28 @@ class RoxyApiClient:
             raise RoxyFingerprintError("Roxy /browser/open 未返回 CDP ws/http")
         return data
 
+    def open_existing_profile_preserving_settings(
+        self,
+        workspace_id: int,
+        dir_id: str,
+    ) -> dict[str, Any]:
+        """Open one explicitly selected Profile without launch overrides.
+
+        This is intentionally separate from ``open_profile``.  A clean-control
+        capture must exercise the Profile's persisted startup/fingerprint
+        configuration, so it must not inject the task proxy, HTTP flags,
+        window size, headless mode, or ``forceOpen`` value.
+        """
+        response = self.request(
+            "POST",
+            "/browser/open",
+            json={"workspaceId": workspace_id, "dirId": dir_id},
+        )
+        data = response.get("data") or {}
+        if not data.get("ws") and not data.get("http"):
+            raise RoxyFingerprintError("Roxy /browser/open 未返回 CDP ws/http")
+        return data
+
     def close_profile(self, dir_id: str) -> None:
         self.request("POST", "/browser/close", json={"dirId": dir_id})
 
