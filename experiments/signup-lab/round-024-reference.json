@@ -1,0 +1,30 @@
+{
+  "round": 24,
+  "mode": "reference",
+  "country": "BA",
+  "status": "failed_before_browser_open",
+  "failure": "ROXY_PROFILE_POLICY_MISMATCH",
+  "ba_hash": "20b1939e7a12c001",
+  "proxy_hash": "1ca1868089ae2dba",
+  "fingerprint_policy": "legacy-macos15-chrome136",
+  "profile_detail": {
+    "core_version": "136",
+    "os": "macOS",
+    "os_version": "15",
+    "user_agent_present_before_mdf": false,
+    "user_agent_present_after_mdf": false,
+    "finger_info_present": false,
+    "mdf_acknowledged": true,
+    "mismatch": "user_agent"
+  },
+  "runtime_identity_checked": false,
+  "target_document_requests": 0,
+  "profile_cleanup": "exact_profile_deleted_after_capture",
+  "evidence": {
+    "capture_path": "captures/signup-lab/round-024-macos-reference",
+    "runtime_gate": "before_browser_open_and_first_approval_navigation"
+  },
+  "conclusion": "Roxy v4 returned a valid core/os detail summary but omitted the generated top-level userAgent in both detail reads. This response shape is nondeterministic because Round 23 exposed a userAgent under the same code and input.",
+  "next_round_focus": "When detail omits userAgent, omit the empty field from mdf and classify it as unobservable; require the existing CDP runtime gate to verify the actual Chrome 136 macOS UA before navigation.",
+  "network_preflight_used": false
+}
