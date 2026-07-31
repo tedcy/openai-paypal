@@ -381,6 +381,7 @@ class BrowserSignupContext:
     fingerprint_policy: dict[str, Any] = field(default_factory=dict)
     profile_freeze: dict[str, Any] = field(default_factory=dict)
     runtime_fingerprint: dict[str, Any] = field(default_factory=dict)
+    warmup: dict[str, Any] = field(default_factory=dict)
     browser_force_open_requested: bool = False
     window_hold_seconds: float = 0.0
     window_hold_completed: bool = False
@@ -553,6 +554,7 @@ class RoxySignupLab:
         protocol_transport: str = "httpx",
         keep_profile: bool = False,
         window_hold_seconds: float = 0.0,
+        warmup: bool = False,
     ):
         if mode not in {"reference", "handoff"}:
             raise ValueError(f"unsupported Roxy signup lab mode: {mode}")
@@ -565,6 +567,7 @@ class RoxySignupLab:
         self.protocol_transport = protocol_transport
         self.keep_profile = keep_profile
         self.window_hold_seconds = max(0.0, min(float(window_hold_seconds), 3600.0))
+        self.warmup = bool(warmup)
 
     def _click_first(self, page: Any, labels: tuple[str, ...]) -> bool:
         for label in labels:
@@ -611,6 +614,51 @@ class RoxySignupLab:
             )
             raise RuntimeError("ROXY_SIGNUP_CHALLENGED")
         return response
+
+    @staticmethod
+    def _warm_up_same_page(page: Any, context: BrowserSignupContext) -> None:
+        """Establish first-party state without probing or solving a challenge."""
+        warmup_url = "https://www.paypal.com/"
+        context.stages.append({"time": _utc_now(), "event": "warmup_start"})
+        response = page.goto(warmup_url, wait_until="commit", timeout=45000)
+        status = int(getattr(response, "status", 0) or 0)
+        if status <= 0:
+            raise RuntimeError("ROXY_WARMUP_NAVIGATION_FAILED")
+        page.wait_for_timeout(5000)
+        final_path = urllib.parse.urlsplit(str(page.url or warmup_url)).path or "/"
+        cookies = page.context.cookies([warmup_url])
+        cookie_names = sorted(
+            {
+                str(cookie.get("name") or "")
+                for cookie in cookies
+                if str(cookie.get("name") or "")
+            }
+        )
+        context.warmup = {
+            "enabled": True,
+            "status": status,
+            "final_path": final_path,
+            "cookie_name_count": len(cookie_names),
+            "cookie_names": cookie_names,
+        }
+        context.stages.append(
+            {
+                "time": _utc_now(),
+                "event": "warmup_complete",
+                "status": status,
+                "path": final_path,
+                "cookie_name_count": len(cookie_names),
+            }
+        )
+        terminal_path = any(
+            marker in final_path.lower()
+            for marker in ("/captcha", "/interstitial", "/authchallenge")
+        )
+        if status >= 400 or terminal_path:
+            context.challenge_markers = list(
+                dict.fromkeys([*context.challenge_markers, "warmup_challenged"])
+            )
+            raise RuntimeError("ROXY_WARMUP_CHALLENGED")
 
     def _capture_controls(self, page: Any, context: BrowserSignupContext, stage: str) -> None:
         try:
@@ -965,6 +1013,8 @@ class RoxySignupLab:
                     context_result.runtime_fingerprint,
                 )
                 self._require_runtime_identity(page, context_result)
+                if self.warmup:
+                    self._warm_up_same_page(page, context_result)
                 approval_url = f"https://www.paypal.com/agreements/approve?ba_token={self.ba_token}"
                 context_result.stages.append({"time": _utc_now(), "event": "approval_start"})
                 try:
@@ -1070,6 +1120,7 @@ class RoxySignupLab:
             "fingerprint_policy": context_result.fingerprint_policy,
             "profile_freeze": context_result.profile_freeze,
             "runtime_fingerprint": context_result.runtime_fingerprint,
+            "warmup": context_result.warmup,
             "http_status": context_result.http_status,
             "classification": context_result.classification,
             "browser_transport": {
@@ -1137,6 +1188,7 @@ def run_signup_lab_from_file(
     protocol_transport: str = "httpx",
     keep_profile: bool = False,
     window_hold_seconds: float = 0.0,
+    warmup: bool = False,
 ) -> dict[str, Any]:
     if mode == "cold-protocol":
         inputs = SignupLabInputs.load(input_file)
@@ -1185,6 +1237,7 @@ def run_signup_lab_from_file(
             protocol_transport=protocol_transport,
             keep_profile=keep_profile,
             window_hold_seconds=window_hold_seconds,
+            warmup=warmup,
         ).run()
         if _approval_document_has_status(result, 403):
             proxy_hash, added = SignupLabInputs.quarantine_proxy(input_file, proxy)

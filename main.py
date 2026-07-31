@@ -84,6 +84,11 @@ def main():
         help="Keep the headed Roxy/CDP window open before closing the lab result",
     )
     parser.add_argument(
+        "--signup-lab-warmup",
+        action="store_true",
+        help="Use the same Roxy Page to establish first-party browser state before approval",
+    )
+    parser.add_argument(
         "--phone",
         default="",
         help="E.164 phone; supported prefixes: +55, +66, +387 and +1"
@@ -212,6 +217,7 @@ def main():
             protocol_transport=args.protocol_transport,
             keep_profile=args.keep_roxy_profile,
             window_hold_seconds=args.roxy_window_hold_seconds,
+            warmup=args.signup_lab_warmup,
         )
         print(json.dumps(sanitize_for_log(result), indent=2, ensure_ascii=False))
         sys.exit(0 if result.get("status") in {"browser_signup_ready", "protocol_signup_ready"} else 1)

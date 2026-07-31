@@ -532,6 +532,69 @@ def test_approval_navigation_stops_at_committed_403() -> None:
     assert context.challenge_markers == ["approval_http_403"]
 
 
+def test_same_page_warmup_records_only_cookie_names() -> None:
+    calls = []
+
+    class BrowserContext:
+        def cookies(self, urls):
+            assert urls == ["https://www.paypal.com/"]
+            return [
+                {"name": "LANG", "value": "secret-language-value"},
+                {"name": "datadome", "value": "secret-datadome-value"},
+            ]
+
+    class Page:
+        url = "https://www.paypal.com/home"
+        context = BrowserContext()
+
+        def goto(self, url, **kwargs):
+            calls.append((url, kwargs))
+            return SimpleNamespace(status=200)
+
+        def wait_for_timeout(self, milliseconds):
+            calls.append(("wait", milliseconds))
+
+    context = BrowserSignupContext()
+    RoxySignupLab._warm_up_same_page(Page(), context)
+
+    assert calls == [
+        ("https://www.paypal.com/", {"wait_until": "commit", "timeout": 45000}),
+        ("wait", 5000),
+    ]
+    assert context.warmup == {
+        "enabled": True,
+        "status": 200,
+        "final_path": "/home",
+        "cookie_name_count": 2,
+        "cookie_names": ["LANG", "datadome"],
+    }
+    assert "secret" not in json.dumps(context.warmup)
+
+
+def test_same_page_warmup_stops_on_terminal_challenge() -> None:
+    class BrowserContext:
+        def cookies(self, urls):
+            return [{"name": "datadome", "value": "secret"}]
+
+    class Page:
+        url = "https://www.paypal.com/captcha/"
+        context = BrowserContext()
+
+        def goto(self, url, **kwargs):
+            return SimpleNamespace(status=403)
+
+        def wait_for_timeout(self, milliseconds):
+            return None
+
+    context = BrowserSignupContext()
+
+    with pytest.raises(RuntimeError, match="ROXY_WARMUP_CHALLENGED"):
+        RoxySignupLab._warm_up_same_page(Page(), context)
+
+    assert context.challenge_markers == ["warmup_challenged"]
+    assert context.warmup["cookie_names"] == ["datadome"]
+
+
 def test_failure_screenshot_is_best_effort_with_short_timeout(tmp_path) -> None:
     calls = []
 
