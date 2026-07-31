@@ -531,6 +531,30 @@ def test_approval_navigation_stops_at_committed_403() -> None:
     assert context.challenge_markers == ["approval_http_403"]
 
 
+def test_failure_screenshot_is_best_effort_with_short_timeout(tmp_path) -> None:
+    calls = []
+
+    class Page:
+        url = "https://www.paypal.com/captcha/"
+
+        def content(self):
+            return "<html>challenge</html>"
+
+        def screenshot(self, **kwargs):
+            calls.append(kwargs)
+
+    lab = object.__new__(RoxySignupLab)
+    lab.capture_root = tmp_path
+    (tmp_path / "browser").mkdir()
+    context = BrowserSignupContext()
+
+    lab._capture_failure_page(Page(), context)
+
+    assert calls[0]["timeout"] == 3000
+    assert calls[0]["full_page"] is True
+    assert context.final_url.endswith("/captcha/")
+
+
 def test_passive_challenge_signals_are_observed_but_not_terminal() -> None:
     lab = object.__new__(RoxySignupLab)
     page = type("Page", (), {

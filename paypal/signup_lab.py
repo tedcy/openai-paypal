@@ -756,7 +756,11 @@ class RoxySignupLab:
         try:
             failure_dir = self.capture_root / "browser"
             (failure_dir / "failure.html").write_text(page.content(), encoding="utf-8")
-            page.screenshot(path=str(failure_dir / "failure.png"), full_page=True)
+            page.screenshot(
+                path=str(failure_dir / "failure.png"),
+                full_page=True,
+                timeout=3000,
+            )
             context.final_url = page.url
         except Exception as exc:
             context.classification["failure_capture_error"] = str(exc)
