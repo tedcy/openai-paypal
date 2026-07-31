@@ -1,0 +1,46 @@
+{
+  "round": 28,
+  "mode": "reference",
+  "country": "BA",
+  "status": "proxy_sid_challenged_and_quarantined",
+  "reported_failure": "ROXY_SIGNUP_REDIRECT_TIMEOUT",
+  "response_class": "APPROVAL_403_CAPTCHA",
+  "ba_hash": "7822effedee5dbc3",
+  "proxy_hash": "535ee6646be3db26",
+  "fingerprint_policy": "legacy-macos15-chrome136",
+  "profile_freeze_verified": true,
+  "runtime_identity_verified": true,
+  "browser_transport": {
+    "http2_disabled": true,
+    "https_http11_responses": 8,
+    "https_h2_responses": 0,
+    "request_events": 10,
+    "response_events": 8,
+    "main_documents": [
+      "/agreements/approve:403:http/1.1",
+      "/captcha/:200:http/1.1"
+    ]
+  },
+  "capture_integrity": {
+    "valid": true,
+    "records": 48,
+    "invalid_lines": 0
+  },
+  "proxy_rotation": {
+    "selected_proxy_index": 0,
+    "next_proxy_index": 1,
+    "quarantined_proxy_count_before": 1,
+    "approval_403_quarantined": true,
+    "quarantine_added": true
+  },
+  "profile_cleanup": "exact_profile_deleted_after_capture",
+  "evidence": {
+    "capture_path": "captures/signup-lab/round-028-rotated-sid-reference",
+    "target_stage_elapsed_ms": 4439,
+    "process_elapsed_ms": 163400
+  },
+  "conclusion": "The newly supplied SID also received approval 403 and was quarantined. This is one proxy sample only; the next Profile will skip both quarantined hashes and use the next pool SID.",
+  "next_round_focus": "Terminate approval 403 immediately after capture integrity flush, then retry the same BA with the next non-quarantined SID and a fresh Profile.",
+  "network_preflight_used": false,
+  "signup_request_captured": false
+}
