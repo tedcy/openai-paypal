@@ -1,0 +1,33 @@
+{
+  "round": 23,
+  "mode": "reference",
+  "country": "BA",
+  "status": "failed_before_target_navigation",
+  "failure": "ROXY_RUNTIME_FINGERPRINT_MISMATCH",
+  "ba_hash": "20b1939e7a12c001",
+  "proxy_hash": "1ca1868089ae2dba",
+  "fingerprint_policy": "legacy-macos15-chrome136",
+  "profile_freeze_verified": true,
+  "runtime_identity": {
+    "browser_product_major": "136",
+    "user_agent_major": "136",
+    "platform": "MacIntel",
+    "language": "en-US",
+    "timezone": "Europe/Sarajevo",
+    "headless_ua": false,
+    "requested_window": "1000x1000",
+    "observed_window": "1000x864",
+    "observed_screen": "1536x864",
+    "mismatch": "outer_height"
+  },
+  "target_document_requests": 0,
+  "profile_cleanup": "exact_profile_deleted_after_capture",
+  "evidence": {
+    "capture_path": "captures/signup-lab/round-023-macos-reference",
+    "capture_integrity": "valid_empty_capture",
+    "runtime_gate": "before_first_approval_navigation"
+  },
+  "conclusion": "The Roxy v4 profile freeze fix reached browser/open and produced the intended macOS Chrome 136 runtime identity. The local gate rejected a desktop-clamped outerHeight equal to screen.height before any target request.",
+  "next_round_focus": "Treat a requested window height clamped to the reported physical screen height as an observed desktop normalization while retaining strict width, UA, platform, language, timezone, and headed checks.",
+  "network_preflight_used": false
+}
