@@ -1,0 +1,70 @@
+{
+  "round": 38,
+  "mode": "reference",
+  "country": "BA",
+  "status": "interrupted_after_approval_challenge",
+  "reported_failure": "COMMAND_INTERRUPTED_DURING_FAILURE_HOLD",
+  "response_class": "APPROVAL_403_DATADOME_CAPTCHA_CAPTURE_INCOMPLETE",
+  "ba_hash": "7822effedee5dbc3",
+  "proxy_hash": "9ec20b2175725992",
+  "fingerprint_policy": "manual-test-macos15-chrome136",
+  "profile_freeze_verified": true,
+  "runtime_identity_verified": true,
+  "runtime_observed": {
+    "headed": true,
+    "chrome_major": 136,
+    "platform": "MacIntel",
+    "language": "zh-CN",
+    "timezone": "Europe/Sarajevo",
+    "hardware_concurrency": 12,
+    "device_memory_gb": 8,
+    "geolocation_permission": "granted",
+    "screen": "2048x1152",
+    "do_not_track": "unobservable_on_internal_page"
+  },
+  "runtime_mismatches": [],
+  "runtime_unobservable": [
+    "do_not_track"
+  ],
+  "browser_transport": {
+    "http2_disabled_requested": true,
+    "https_http11_responses": 6,
+    "https_h2_responses": 0,
+    "request_events": 20,
+    "response_events": 15,
+    "loading_failed_events": 4,
+    "main_documents": [
+      "/agreements/approve:403:http/1.1",
+      "/interstitial/:200:http/1.1",
+      "/captcha/:200:http/1.1"
+    ]
+  },
+  "failure_body": {
+    "bytes": 1432,
+    "sha256": "db21797826c3b2fa1b4fa4f8e16f919a91c278694387d57a6099108c49411935",
+    "datadome_marker": true,
+    "captcha_marker": true
+  },
+  "capture_integrity": {
+    "valid": false,
+    "physical_lines": 73,
+    "valid_json_lines": 71,
+    "invalid_json_lines": 2,
+    "cause": "process_interrupted_before_ordered_writer_flush"
+  },
+  "target_navigation_started": true,
+  "proxy_rotation": {
+    "selected_proxy_index": 10,
+    "next_proxy_index": 11,
+    "approval_403_quarantined": "unknown_because_process_was_interrupted"
+  },
+  "profile_cleanup": "exact_round_profile_closed_and_deleted; manual_test_profile_untouched",
+  "evidence": {
+    "capture_path": "captures/signup-lab/round-038-manual-test-parity-reference"
+  },
+  "conclusion": "The aligned runtime passed its pre-navigation gate and the first target document returned approval 403 followed by interstitial and CAPTCHA documents over HTTP/1.1. The process interruption left two malformed JSONL lines, so this is supporting evidence rather than a valid completed round. IP-derived language resolved to zh-CN while timezone resolved to Europe/Sarajevo, revealing that the UI's based-on-IP policy label does not by itself prove a coherent runtime locale for an API-created Profile.",
+  "next_round_focus": "Repeat the unchanged code with the next Profile and SID, allow ordered capture shutdown to complete, and only then decide whether the manual-test parity policy still produces the same challenge signature.",
+  "mcp_dry_run": "tool_timeout_terminated_without_fallback",
+  "network_preflight_used": false,
+  "signup_request_captured": false
+}
