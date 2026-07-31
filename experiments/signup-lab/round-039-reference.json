@@ -1,0 +1,83 @@
+{
+  "round": 39,
+  "mode": "reference",
+  "country": "BA",
+  "status": "approval_challenged_after_manual_profile_policy_alignment",
+  "reported_failure": "ROXY_SIGNUP_CHALLENGED",
+  "response_class": "APPROVAL_403_INTERSTITIAL_CAPTCHA",
+  "ba_hash": "7822effedee5dbc3",
+  "proxy_hash": "c9a3d7e272a1e86b",
+  "fingerprint_policy": "manual-test-macos15-chrome136",
+  "profile_freeze_verified": true,
+  "runtime_identity_verified": true,
+  "runtime_observed": {
+    "headed": true,
+    "chrome_major": 136,
+    "platform": "MacIntel",
+    "language": "bs-BA",
+    "timezone": "Europe/Sarajevo",
+    "hardware_concurrency": 12,
+    "device_memory_gb": 8,
+    "geolocation_permission": "granted",
+    "screen": "2048x1152",
+    "do_not_track": "unobservable_on_internal_page"
+  },
+  "runtime_mismatches": [],
+  "runtime_unobservable": [
+    "do_not_track"
+  ],
+  "approval_request": {
+    "accept_language": "bs-BA,bs;q=0.9",
+    "dnt_header_present": false,
+    "client_hints_platform": "macOS",
+    "sec_fetch_site": "none",
+    "cookie_name_count": 0
+  },
+  "browser_transport": {
+    "http2_disabled_requested": true,
+    "https_http11_responses": 11,
+    "https_h2_responses": 0,
+    "request_events": 25,
+    "response_events": 20,
+    "loading_failed_events": 4,
+    "main_documents": [
+      "/agreements/approve:403:http/1.1",
+      "/interstitial/:200:http/1.1",
+      "/captcha/:200:http/1.1"
+    ]
+  },
+  "capture_integrity": {
+    "valid": true,
+    "records": 98,
+    "invalid_lines": 0
+  },
+  "stage_timing": {
+    "approval_to_hold_ms": 20368,
+    "hold_end_ms": 140384
+  },
+  "manual_round20_control": {
+    "approval_status": 200,
+    "transport": "http/1.1",
+    "accept_language": "en-US,en;q=0.9",
+    "dnt_header_present": true,
+    "client_hints_platform": "Windows",
+    "cookie_name_count": 6,
+    "cookie_names": [
+      "LANG",
+      "tsrce",
+      "nsid",
+      "ts",
+      "ts_c",
+      "datadome"
+    ]
+  },
+  "profile_cleanup": "exact_round_profile_closed_and_deleted; manual_test_profile_untouched",
+  "evidence": {
+    "capture_path": "captures/signup-lab/round-039-manual-test-parity-reference"
+  },
+  "conclusion": "The complete manual-test policy alignment produced a coherent headed macOS Chrome 136 runtime and request headers, but a fresh Profile still received approval 403 followed by interstitial and CAPTCHA. The successful manual Round 20 control began its approval request with six state cookies including datadome, while this fresh automatic Profile sent zero cookies. OS, browser generation, and BA inputs also differ between the controls, so the cookie gap is a focused next hypothesis rather than proof of causality. The configured DNT value was not exposed in either the internal runtime or the target request header.",
+  "next_round_focus": "Add one explicit same-Page browser warm-up stage before approval, record only the resulting cookie names and document classification, then navigate to approval without changing Profile, SID, fingerprint, or HTTP/1.1 settings.",
+  "mcp_dry_run": "tool_timeout_terminated_without_fallback",
+  "network_preflight_used": false,
+  "signup_request_captured": false
+}
