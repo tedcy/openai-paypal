@@ -16,6 +16,7 @@ from paypal.signup_lab import (
     SignupLabInputs,
     _approval_document_has_status,
     _configure_roxy_for_signup_lab,
+    _create_dedicated_control_page,
     _hash,
     _safe_existing_profile_detail,
     audit_jsonl_capture,
@@ -1153,3 +1154,40 @@ def test_existing_ios_profile_detail_recognizes_crios_major() -> None:
 
     assert safe["user_agent_major"] == "136"
     assert safe["expected_name_verified"] is True
+
+
+def test_approval_control_creates_dedicated_page_before_closing_startup_pages() -> None:
+    events = []
+
+    class Page:
+        def __init__(self, name):
+            self.name = name
+
+        def close(self):
+            events.append(("close", self.name))
+
+    startup_one = Page("startup-one")
+    startup_two = Page("startup-two")
+    dedicated = Page("dedicated")
+
+    class Context:
+        pages = [startup_one, startup_two]
+
+        def new_page(self):
+            events.append(("create", "dedicated"))
+            return dedicated
+
+    page, summary = _create_dedicated_control_page(Context())
+
+    assert page is dedicated
+    assert events == [
+        ("create", "dedicated"),
+        ("close", "startup-one"),
+        ("close", "startup-two"),
+    ]
+    assert summary == {
+        "startup_page_count": 2,
+        "startup_pages_closed": 2,
+        "startup_page_close_failures": [],
+        "dedicated_page_created": True,
+    }

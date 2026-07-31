@@ -1379,6 +1379,28 @@ class ApprovalCdpObserver:
         return {"main_documents": list(self.main_documents)}
 
 
+def _create_dedicated_control_page(browser_context: Any) -> tuple[Any, dict[str, Any]]:
+    """Create the controlled Page before closing Roxy's transient startup Pages."""
+    startup_pages = list(browser_context.pages)
+    page = browser_context.new_page()
+    closed = 0
+    close_failures: list[str] = []
+    for startup_page in startup_pages:
+        if startup_page is page:
+            continue
+        try:
+            startup_page.close()
+            closed += 1
+        except Exception as exc:
+            close_failures.append(type(exc).__name__)
+    return page, {
+        "startup_page_count": len(startup_pages),
+        "startup_pages_closed": closed,
+        "startup_page_close_failures": close_failures,
+        "dedicated_page_created": True,
+    }
+
+
 class RoxyApprovalControl:
     """Approval-only iOS Roxy control that never submits a page control."""
 
@@ -1476,7 +1498,10 @@ class RoxyApprovalControl:
         http_status = 0
         final_path = ""
         error_type = ""
+        failure_stage = "initialization"
+        page_lifecycle: dict[str, Any] = {}
         try:
+            failure_stage = "profile_selection"
             if profile_id:
                 detail = client.get_profile_detail(config.workspace_id, profile_id)
                 if not detail:
@@ -1499,7 +1524,9 @@ class RoxyApprovalControl:
                 client.close_profile(profile_id)
             except Exception:
                 pass
+            failure_stage = "profile_state_reset"
             client.clear_profile_cache(config.workspace_id, profile_id)
+            failure_stage = "profile_randomize_and_freeze"
             frozen = client.randomize_and_freeze_profile(
                 config.workspace_id,
                 profile_id,
@@ -1514,6 +1541,7 @@ class RoxyApprovalControl:
                 detail,
                 expected_name=self.existing_profile_name,
             )
+            failure_stage = "browser_open"
             cdp_info = client.open_existing_profile_preserving_settings(
                 config.workspace_id,
                 profile_id,
@@ -1528,16 +1556,12 @@ class RoxyApprovalControl:
                 if len(contexts) != 1:
                     raise RuntimeError(f"expected one Roxy context, got {len(contexts)}")
                 browser_context = contexts[0]
-                pages = list(browser_context.pages)
-                page = pages[0] if pages else browser_context.new_page()
-                for stale in pages[1:]:
-                    try:
-                        stale.close()
-                    except Exception:
-                        pass
+                failure_stage = "dedicated_page_create"
+                page, page_lifecycle = _create_dedicated_control_page(browser_context)
                 cdp = browser_context.new_cdp_session(page)
                 observer = ApprovalCdpObserver(cdp, self.capture_root / "browser")
                 observer.start()
+                failure_stage = "runtime_fingerprint_verification"
                 runtime_fingerprint = inspect_roxy_runtime_identity(
                     cdp,
                     page,
@@ -1550,6 +1574,7 @@ class RoxyApprovalControl:
                     "https://www.paypal.com/agreements/approve?ba_token="
                     f"{self.ba_token}"
                 )
+                failure_stage = "approval_navigation"
                 response = page.goto(
                     approval_url,
                     wait_until="commit",
@@ -1565,6 +1590,7 @@ class RoxyApprovalControl:
                     headers.get("content-type") or headers.get("Content-Type") or ""
                 )
                 flags = self._control_flags(page)
+                failure_stage = "approval_classification"
                 classification = classify_approval_document(
                     http_status,
                     content_type,
@@ -1590,6 +1616,7 @@ class RoxyApprovalControl:
                     observer = None
                 browser.close()
                 browser = None
+                failure_stage = "completed"
         except Exception as exc:
             error_type = type(exc).__name__
             logger.error(
@@ -1644,6 +1671,8 @@ class RoxyApprovalControl:
             "profile_cleanup": profile_cleanup,
             "profile_retained": bool(profile_id),
             "error_type": error_type,
+            "failure_stage": failure_stage,
+            "page_lifecycle": page_lifecycle,
             "capture_root": str(self.capture_root),
         }
         _write_json(self.capture_root / "checkpoint.json", safe)
