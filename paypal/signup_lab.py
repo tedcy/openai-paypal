@@ -434,14 +434,24 @@ class RoxySignupLab:
             )
             return
 
-        control = page.get_by_role(
-            "button",
-            name=re.compile(r"country(?:\s+or\s+region)?\s+select", re.I),
+        control_name = re.compile(r"country(?:\s+or\s+region)?\s+select", re.I)
+        controls = (
+            page.get_by_role("combobox", name=control_name),
+            page.get_by_role("button", name=control_name),
+            page.locator('button[aria-label="Country select"]'),
         )
         try:
-            if not control.count() or not control.first.is_visible():
+            control = next(
+                (
+                    locator.first
+                    for locator in controls
+                    if locator.count() and locator.first.is_visible()
+                ),
+                None,
+            )
+            if control is None:
                 raise RuntimeError("ROXY_COUNTRY_CONTROL_MISSING")
-            control.first.click(timeout=5000)
+            control.click(timeout=5000)
             page.wait_for_timeout(350)
         except RuntimeError:
             raise
