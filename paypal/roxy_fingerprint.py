@@ -22,7 +22,6 @@ from config import (
     ROXY_API_HOST,
     ROXY_API_KEY,
     ROXY_API_PORT,
-    ROXY_HEADLESS,
     ROXY_PROJECT_ID,
     ROXY_WORKSPACE_ID,
     SCREEN,
@@ -355,7 +354,7 @@ class RoxyCaptureConfig:
     api_key: str
     workspace_id: int | None = None
     project_id: int | None = None
-    headless: bool = True
+    headless: bool = False
     force_open: bool = False
     close_before_open: bool = False
     timeout_seconds: float = 12.0
@@ -365,18 +364,38 @@ class RoxyCaptureConfig:
     delete_auto_workspace: bool = False
     force_temp_workspace: bool = False
     workspace_name_prefix: str = "paypal-auto"
-    open_width: int = 1365
-    open_height: int = 768
+    open_width: int = 1000
+    open_height: int = 1000
     screen_width: int = 1536
     screen_height: int = 864
     language: str = "en-US"
     display_language: str = "en-US"
     timezone: str = "UTC"
     follow_ip: bool = False
-    core_version: str = ""
-    os_name: str = "Windows"
-    os_version: str = "11"
+    core_type: str = "Chrome"
+    core_version: str = "136"
+    os_name: str = "macOS"
+    os_version: str = "15"
+    web_rtc_mode: int = 0
     proxy_url: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class RoxyFingerprintPolicy:
+    """Identity fields shared by every Roxy-backed flow."""
+
+    name: str = "legacy-macos15-chrome136"
+    core_type: str = "Chrome"
+    core_version: str = "136"
+    os_name: str = "macOS"
+    os_version: str = "15"
+    web_rtc_mode: int = 0
+    headless: bool = False
+    open_width: int = 1000
+    open_height: int = 1000
+
+
+ROXY_FINGERPRINT_POLICY = RoxyFingerprintPolicy()
 
 
 def load_roxy_capture_config(
@@ -395,13 +414,13 @@ def load_roxy_capture_config(
         selected_profile.update(browser_profile)
     language = roxy_language_value(selected_profile)
     timezone = roxy_timezone_value(selected_profile)
-    headless = _env_bool("PAYPAL_ROXY_HEADLESS", ROXY_HEADLESS)
+    policy = ROXY_FINGERPRINT_POLICY
     return RoxyCaptureConfig(
         api_base=api_base,
         api_key=configured_roxy_api_key(),
         workspace_id=_env_int("PAYPAL_ROXY_WORKSPACE_ID", ROXY_WORKSPACE_ID),
         project_id=_env_int("PAYPAL_ROXY_PROJECT_ID", ROXY_PROJECT_ID),
-        headless=headless,
+        headless=policy.headless,
         force_open=_env_bool("PAYPAL_ROXY_FORCE_OPEN", False),
         close_before_open=_env_bool("PAYPAL_ROXY_CLOSE_BEFORE_OPEN", False),
         timeout_seconds=max(2.0, _env_float("PAYPAL_ROXY_API_TIMEOUT_SECONDS", 12.0)),
@@ -411,17 +430,19 @@ def load_roxy_capture_config(
         delete_auto_workspace=_env_bool("PAYPAL_ROXY_DELETE_AUTO_WORKSPACE", False),
         force_temp_workspace=_env_bool("PAYPAL_ROXY_FORCE_TEMP_WORKSPACE", False),
         workspace_name_prefix=_env_str("PAYPAL_ROXY_WORKSPACE_NAME_PREFIX", "paypal-auto"),
-        open_width=_env_int("PAYPAL_ROXY_OPEN_WIDTH", int(VIEWPORT.get("width", 1365) or 1365)) or 1365,
-        open_height=_env_int("PAYPAL_ROXY_OPEN_HEIGHT", int(VIEWPORT.get("height", 768) or 768)) or 768,
+        open_width=policy.open_width,
+        open_height=policy.open_height,
         screen_width=_env_int("PAYPAL_ROXY_SCREEN_WIDTH", int(SCREEN.get("width", 1536) or 1536)) or 1536,
         screen_height=_env_int("PAYPAL_ROXY_SCREEN_HEIGHT", int(SCREEN.get("height", 864) or 864)) or 864,
         language=_env_str("PAYPAL_ROXY_LANGUAGE", language),
         display_language=_env_str("PAYPAL_ROXY_DISPLAY_LANGUAGE", language),
         timezone=_env_str("PAYPAL_ROXY_TIMEZONE", timezone),
         follow_ip=_env_bool("PAYPAL_ROXY_FOLLOW_IP", False),
-        core_version=_env_str("PAYPAL_ROXY_CORE_VERSION", ""),
-        os_name=_env_str("PAYPAL_ROXY_OS", "Windows"),
-        os_version=_env_str("PAYPAL_ROXY_OS_VERSION", "11"),
+        core_type=policy.core_type,
+        core_version=policy.core_version,
+        os_name=policy.os_name,
+        os_version=policy.os_version,
+        web_rtc_mode=policy.web_rtc_mode,
         # `proxy_url` is tri-state:
         #   None => standalone/default mode may use PAYPAL_ROXY_PROXY_URL;
         #   ""   => explicit no-proxy, used when the Web/CLI flow disables proxy;
@@ -607,11 +628,15 @@ class RoxyApiClient:
 
     def create_profile(self, workspace_id: int, project_id: int | None) -> str:
         proxy_info = _roxy_proxy_info(self.config.proxy_url)
-        startup_args = _roxy_profile_startup_args(self.config.proxy_url)
+        startup_args = _roxy_profile_startup_args(
+            self.config.proxy_url,
+            open_width=self.config.open_width,
+            open_height=self.config.open_height,
+        )
         payload: dict[str, Any] = {
             "workspaceId": workspace_id,
             "windowName": f"paypal-fp-{uuid.uuid4().hex[:10]}",
-            "coreType": "Chrome",
+            "coreType": self.config.core_type,
             "os": self.config.os_name,
             "osVersion": self.config.os_version,
             "cookie": [],
@@ -657,7 +682,7 @@ class RoxyApiClient:
                 "resolutionX": str(self.config.screen_width),
                 "resolutionY": str(self.config.screen_height),
                 "fontType": True,
-                "webRTC": 2,
+                "webRTC": self.config.web_rtc_mode,
                 "webGL": True,
                 "webGLInfo": True,
                 "webGLManufacturer": "",
@@ -689,11 +714,21 @@ class RoxyApiClient:
             payload["coreVersion"] = self.config.core_version
         if project_id is not None:
             payload["projectId"] = project_id
-        logger.debug(
-            "Creating Roxy profile workspace_id={} project_id={} proxy={} category={} startup_args={}",
+        logger.info(
+            "Creating Roxy profile policy={} core={}/{} os={}/{} webRTC={} headed={} "
+            "window={}x{} workspace_id={} project_id={} proxy_enabled={} category={} startup_args={}",
+            ROXY_FINGERPRINT_POLICY.name,
+            self.config.core_type,
+            self.config.core_version,
+            self.config.os_name,
+            self.config.os_version,
+            self.config.web_rtc_mode,
+            not self.config.headless,
+            self.config.open_width,
+            self.config.open_height,
             workspace_id,
             project_id,
-            _redact_proxy_url(self.config.proxy_url) or "noproxy",
+            bool(_canonical_proxy_url(self.config.proxy_url)),
             proxy_info.get("proxyCategory"),
             startup_args,
         )
@@ -710,7 +745,11 @@ class RoxyApiClient:
         # Roxy 的 Local API 用 `headless` 字段控制无头模式。当前默认直接打开：
         # 不先 close，不强制 forceOpen；如需处理旧可见窗口复用，可通过环境变量
         # PAYPAL_ROXY_CLOSE_BEFORE_OPEN / PAYPAL_ROXY_FORCE_OPEN 显式开启。
-        args = _roxy_open_args(self.config.proxy_url)
+        args = _roxy_open_args(
+            self.config.proxy_url,
+            open_width=int(getattr(self.config, "open_width", ROXY_FINGERPRINT_POLICY.open_width)),
+            open_height=int(getattr(self.config, "open_height", ROXY_FINGERPRINT_POLICY.open_height)),
+        )
         http2_disabled = "--disable-http2" in args
         if self.config.headless and self.config.close_before_open:
             try:
@@ -724,7 +763,7 @@ class RoxyApiClient:
             "forceOpen": bool(self.config.force_open),
             "headless": True if self.config.headless else False,
         }
-        logger.debug(
+        logger.info(
             "Opening Roxy browser dir_id={} headless={} forceOpen={} http2_disabled={} args={}",
             dir_id,
             payload["headless"],
@@ -859,19 +898,36 @@ def _proxy_url_hash(proxy_url: object = None) -> str:
     return _sha256_hex(_canonical_proxy_url(proxy_url))
 
 
-def _roxy_open_args(proxy_url: object = None, base_args: Iterable[str] | None = None) -> list[str]:
+def _roxy_open_args(
+    proxy_url: object = None,
+    base_args: Iterable[str] | None = None,
+    *,
+    open_width: int = ROXY_FINGERPRINT_POLICY.open_width,
+    open_height: int = ROXY_FINGERPRINT_POLICY.open_height,
+) -> list[str]:
     """Build deterministic Roxy Chromium args without duplicating flags."""
     args = list(base_args or ("--remote-allow-origins=*", "--disable-audio-output"))
     if _canonical_proxy_url(proxy_url) and "--disable-http2" not in args:
         args.append("--disable-http2")
+    if not any(str(arg).startswith("--window-size=") for arg in args):
+        args.append(f"--window-size={int(open_width)},{int(open_height)}")
     return args
 
 
-def _roxy_profile_startup_args(proxy_url: object = None) -> list[str]:
+def _roxy_profile_startup_args(
+    proxy_url: object = None,
+    *,
+    open_width: int = ROXY_FINGERPRINT_POLICY.open_width,
+    open_height: int = ROXY_FINGERPRINT_POLICY.open_height,
+) -> list[str]:
     """Return create-time args only for profiles that actually use a proxy."""
     if not _canonical_proxy_url(proxy_url):
         return []
-    return _roxy_open_args(proxy_url)
+    return _roxy_open_args(
+        proxy_url,
+        open_width=open_width,
+        open_height=open_height,
+    )
 
 
 def roxy_browser_matches_proxy(roxy_browser: dict[str, Any], proxy_url: object = None) -> bool:

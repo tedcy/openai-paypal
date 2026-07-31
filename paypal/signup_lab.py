@@ -29,6 +29,7 @@ from paypal.proxy import ProxyEntry
 from paypal.roxy_fingerprint import (
     RoxyApiClient,
     RoxyFingerprintError,
+    ROXY_FINGERPRINT_POLICY,
     _connect_over_cdp,
     _roxy_open_args,
     _roxy_profile_startup_args,
@@ -305,6 +306,7 @@ class BrowserSignupContext:
     capture_integrity: dict[str, Any] = field(default_factory=dict)
     stage_timing: dict[str, Any] = field(default_factory=dict)
     ui_generation: str = "unknown"
+    fingerprint_policy: dict[str, Any] = field(default_factory=dict)
 
 
 def classify_signup_ui(url: str) -> str:
@@ -728,9 +730,21 @@ class RoxySignupLab:
         if config.workspace_id is None or config.project_id is None:
             raise RoxyFingerprintError("signup lab requires fixed PAYPAL_ROXY_WORKSPACE_ID and PAYPAL_ROXY_PROJECT_ID")
         client = RoxyApiClient(config)
-        context_result = BrowserSignupContext(workspace_id=config.workspace_id, project_id=config.project_id)
-        context_result.browser_create_args = _roxy_profile_startup_args(config.proxy_url)
-        context_result.browser_open_args = _roxy_open_args(config.proxy_url)
+        context_result = BrowserSignupContext(
+            workspace_id=config.workspace_id,
+            project_id=config.project_id,
+            fingerprint_policy=asdict(ROXY_FINGERPRINT_POLICY),
+        )
+        context_result.browser_create_args = _roxy_profile_startup_args(
+            config.proxy_url,
+            open_width=config.open_width,
+            open_height=config.open_height,
+        )
+        context_result.browser_open_args = _roxy_open_args(
+            config.proxy_url,
+            open_width=config.open_width,
+            open_height=config.open_height,
+        )
         context_result.http2_disabled_requested = "--disable-http2" in context_result.browser_open_args
         profile_id = ""
         succeeded = False
@@ -866,6 +880,7 @@ class RoxySignupLab:
             "proxy_hash": _hash(self.proxy_entry.url),
             "country": self.country_profile.country,
             "ui_generation": context_result.ui_generation,
+            "fingerprint_policy": context_result.fingerprint_policy,
             "http_status": context_result.http_status,
             "classification": context_result.classification,
             "browser_transport": {

@@ -291,10 +291,12 @@ def test_browser_context_tracks_create_and_open_transport_args() -> None:
         browser_create_args=["--disable-http2"],
         browser_open_args=["--disable-http2"],
         http2_disabled_requested=True,
+        fingerprint_policy={"name": "legacy-macos15-chrome136", "web_rtc_mode": 0},
     )
 
     assert context.browser_create_args == context.browser_open_args
     assert context.http2_disabled_requested is True
+    assert context.fingerprint_policy["web_rtc_mode"] == 0
 
 
 def test_compare_supports_new_and_overwritten_legacy_cdp_events(tmp_path) -> None:

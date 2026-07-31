@@ -62,8 +62,8 @@ FINGERPRINT_SOURCE = "random"
 ROXY_API_HOST = "127.0.0.1"
 ROXY_API_PORT = 50000
 ROXY_API_KEY = ""
-# Roxy Local API 的 /browser/open 支持 headless 字段；Roxy 模式默认使用无头模式。
-ROXY_HEADLESS = True
+# Roxy flows use the shared headed macOS 15 / Chrome 136 policy.
+ROXY_HEADLESS = False
 
 # 可选：固定 workspace/project；为空时自动读取 /browser/workspace 第一项。
 ROXY_WORKSPACE_ID: int | None = None
