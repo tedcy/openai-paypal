@@ -1,0 +1,43 @@
+{
+  "round": 59,
+  "mode": "approval-control",
+  "control": "first fresh-SID test Profile sample for newly supplied BA candidate one",
+  "ba_hash": "15e96bc757b6d93f",
+  "proxy_hash": "367717db7471baa2",
+  "profile_hash": "ee3917e3ec1305dc",
+  "proxy_cursor": {
+    "selected": 27,
+    "next": 28,
+    "quarantined": true
+  },
+  "fingerprint_runtime": {
+    "verified": true,
+    "browser": "Chrome 136.0.7103.49",
+    "user_agent": "iOS 18 CriOS 136.0.7103.49",
+    "platform": "iPhone",
+    "headless": false
+  },
+  "result": "APPROVAL_PAY_200_WITH_PASSIVE_CHALLENGE_MARKERS",
+  "http_status": 200,
+  "final_path": "/pay",
+  "transport": "http/1.1",
+  "capture_integrity": "valid_2_of_2",
+  "challenge_markers": [
+    "datadome",
+    "captcha"
+  ],
+  "approval_controls": {
+    "email": true,
+    "create_account": true
+  },
+  "profile_cleanup": "closed_retained",
+  "network_environment_inspected": false,
+  "evidence": [
+    "approval returned HTTP 200 over HTTP/1.1 and the application reached /pay rather than checkoutweb/genericError",
+    "the rendered document exposed both the email and Create Account controls",
+    "the conservative classifier found passive DataDome/CAPTCHA strings in otherwise ready application HTML and therefore did not mark the sample approval_ready",
+    "the coherent headed iOS runtime and all two captured records verified",
+    "no challenge was solved and no Create Account, signup, phone, OTP, registration, funding, or authorization action occurred"
+  ],
+  "conclusion": "This is not a genericError failover condition. Keep BA hash 15e96bc757b6d93f selected and repeat with a fresh SID to determine whether the ready /pay surface is reproducible while preserving the no-interaction boundary."
+}
