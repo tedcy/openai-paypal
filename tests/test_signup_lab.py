@@ -341,9 +341,12 @@ def test_contact_signup_stops_before_phone_submission() -> None:
 def test_signup_navigation_uses_locale_independent_create_account_control() -> None:
     source = inspect.getsource(RoxySignupLab._drive_to_signup)
 
+    assert source.index("if capture.paused_signup is not None") < source.index(
+        "page.wait_for_timeout(350)"
+    )
     assert 'form[data-testid="create-account-form"]' in source
     assert 'button[type="submit"]' in source
-    assert "no_wait_after=True" in source
+    assert source.count("no_wait_after=True") >= 2
     assert "english-text-fallback" in source
 
 

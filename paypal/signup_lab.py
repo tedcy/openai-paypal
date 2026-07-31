@@ -807,13 +807,15 @@ class RoxySignupLab:
         pay_create_account_selected = False
         pay_form_submitted = False
         while time.monotonic() < deadline:
+            if capture.paused_signup is not None:
+                return
             page.wait_for_timeout(350)
+            if capture.paused_signup is not None:
+                return
             url = page.url
             if url != last_url:
                 context.stages.append({"time": _utc_now(), "event": "url", "url": url})
                 last_url = url
-            if capture.paused_signup is not None:
-                return
             if "/checkoutweb/signup" in url:
                 context.ui_generation = "legacy_checkoutweb"
                 return
@@ -905,7 +907,10 @@ class RoxySignupLab:
                     if form.count() and email_input.count() and continue_button.count():
                         email = f"signup-lab-{int(time.time())}@example.com"
                         email_input.first.fill(email)
-                        continue_button.first.click(timeout=5000)
+                        continue_button.first.click(
+                            timeout=5000,
+                            no_wait_after=True,
+                        )
                         pay_form_submitted = True
                         context.stages.append({"time": _utc_now(), "event": "pay_email_form_submitted"})
                         continue
