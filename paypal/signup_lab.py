@@ -48,6 +48,7 @@ _INVALID_BA_MARKERS = (
     "invalid ba token",
     "expired ba token",
 )
+_SIGNUP_LAB_ROXY_API_TIMEOUT_SECONDS = 60.0
 
 
 def _utc_now() -> str:
@@ -197,6 +198,16 @@ def classify_signup_ui(url: str) -> str:
     ):
         return "contact_signup"
     return "unknown"
+
+
+def _configure_roxy_for_signup_lab(config: Any) -> None:
+    config.headless = False
+    config.close_after_capture = False
+    config.delete_after_capture = False
+    config.timeout_seconds = max(
+        float(config.timeout_seconds),
+        _SIGNUP_LAB_ROXY_API_TIMEOUT_SECONDS,
+    )
 
 
 class CdpCapture:
@@ -587,9 +598,7 @@ class RoxySignupLab:
         self.capture_root.mkdir(parents=True, exist_ok=True)
         profile = browser_profile_for(self.country_profile, BROWSER_PROFILE)
         config = load_roxy_capture_config(proxy_url=self.proxy_entry.url, browser_profile=profile)
-        config.headless = False
-        config.close_after_capture = False
-        config.delete_after_capture = False
+        _configure_roxy_for_signup_lab(config)
         if config.workspace_id is None or config.project_id is None:
             raise RoxyFingerprintError("signup lab requires fixed PAYPAL_ROXY_WORKSPACE_ID and PAYPAL_ROXY_PROJECT_ID")
         client = RoxyApiClient(config)

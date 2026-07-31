@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import httpx
@@ -9,6 +10,7 @@ from paypal.signup_lab import (
     CdpCapture,
     RoxySignupLab,
     SignupLabInputs,
+    _configure_roxy_for_signup_lab,
     classify_signup_document,
     classify_signup_ui,
 )
@@ -98,6 +100,22 @@ def test_contact_signup_stops_before_phone_submission() -> None:
 
     assert context.ui_generation == "contact_signup"
     assert context.stages[-1]["reason"] == "phone_submission_out_of_scope"
+
+
+def test_signup_lab_allows_slow_roxy_profile_startup() -> None:
+    config = SimpleNamespace(
+        headless=True,
+        close_after_capture=True,
+        delete_after_capture=True,
+        timeout_seconds=12.0,
+    )
+
+    _configure_roxy_for_signup_lab(config)
+
+    assert config.headless is False
+    assert config.close_after_capture is False
+    assert config.delete_after_capture is False
+    assert config.timeout_seconds == 60.0
 
 
 def test_signup_document_requires_healthy_signup_html() -> None:
