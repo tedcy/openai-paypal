@@ -1,0 +1,59 @@
+{
+  "round": 35,
+  "mode": "reference",
+  "country": "BA",
+  "status": "proxy_sid_challenged_and_quarantined",
+  "reported_failure": "ROXY_SIGNUP_CHALLENGED",
+  "response_class": "APPROVAL_403",
+  "ba_hash": "7822effedee5dbc3",
+  "proxy_hash": "7197ee00ac4a93fd",
+  "fingerprint_policy": "legacy-macos15-chrome136",
+  "profile_freeze_verified": true,
+  "runtime_identity_verified": true,
+  "runtime_normalizations": [
+    "outer_width_window_frame",
+    "outer_height_clamped_to_screen"
+  ],
+  "window_lifecycle": {
+    "headed": true,
+    "force_open_requested": true,
+    "hold_seconds": 120,
+    "hold_completed": true,
+    "same_cdp_page_during_hold": true
+  },
+  "browser_transport": {
+    "http2_disabled": true,
+    "https_http11_responses": 2,
+    "https_h2_responses": 0,
+    "request_events": 3,
+    "response_events": 2,
+    "loading_failed_events": 2,
+    "main_documents": [
+      "/agreements/approve:403:http/1.1"
+    ]
+  },
+  "capture_integrity": {
+    "valid": true,
+    "records": 13,
+    "invalid_lines": 0
+  },
+  "stage_timing": {
+    "approval_to_hold_ms": 5035,
+    "hold_end_ms": 125041
+  },
+  "proxy_rotation": {
+    "selected_proxy_index": 7,
+    "next_proxy_index": 8,
+    "quarantined_proxy_count_before": 6,
+    "approval_403_quarantined": true,
+    "quarantine_added": true
+  },
+  "profile_cleanup": "exact_profile_deleted_after_120_second_hold",
+  "evidence": {
+    "capture_path": "captures/signup-lab/round-035-headed-hold-reference"
+  },
+  "conclusion": "The visibly headed Roxy window used forceOpen=true and remained connected to the same CDP Page for the full 120-second failure hold. Approval returned 403 over HTTP/1.1, so this SID was quarantined. The experiment rules out an accidentally headless or immediately closed window for this sample.",
+  "next_round_focus": "Keep the verified headed lifecycle and unchanged fingerprint, then retry with the next non-quarantined SID and a fresh Profile.",
+  "network_preflight_used": false,
+  "signup_request_captured": false
+}
