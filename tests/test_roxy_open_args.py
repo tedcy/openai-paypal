@@ -314,7 +314,8 @@ def test_randomized_ios_freeze_preserves_generated_noise_and_refreshes_host_iden
     assert modified["coreVersion"] == "136"
     assert modified["os"] == "IOS"
     assert modified["osVersion"] == "18"
-    assert "userAgent" not in modified
+    assert "CriOS/136.0.7103.49" in modified["userAgent"]
+    assert "iPhone OS 18_0" in modified["userAgent"]
     assert modified["fingerInfo"]["canvas"] == {"noise": "new-canvas"}
     assert modified["fingerInfo"]["audioContext"] == {"noise": "new-audio"}
     assert modified["fingerInfo"]["webGLRender"] == "Roxy generated GPU"

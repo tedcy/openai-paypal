@@ -468,6 +468,17 @@ def _fresh_roxy_host_identity() -> tuple[str, str]:
     return device_name, "-".join(f"{value:02X}" for value in mac)
 
 
+def _fixed_randomized_user_agent(config: RoxyCaptureConfig) -> str:
+    """Return only the top-level UA required by a fixed randomized OS policy."""
+    if config.os_name.lower() != "ios" or _normalized_major(config.core_version) != "136":
+        return ""
+    return (
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) "
+        "AppleWebKit/605.1.15 (KHTML, like Gecko) "
+        "CriOS/136.0.7103.49 Mobile/15E148 Safari/604.1"
+    )
+
+
 def _roxy_finger_info_template(
     config: RoxyCaptureConfig,
     startup_args: Iterable[str],
@@ -1427,7 +1438,12 @@ class RoxyApiClient:
         for key in ("windowName", "windowRemark", "searchEngine"):
             if key in before:
                 values[key] = before[key]
-        if before.get("userAgent") and not preserve_randomized:
+        fixed_randomized_user_agent = (
+            _fixed_randomized_user_agent(self.config) if preserve_randomized else ""
+        )
+        if fixed_randomized_user_agent:
+            values["userAgent"] = fixed_randomized_user_agent
+        elif before.get("userAgent") and not preserve_randomized:
             values["userAgent"] = before["userAgent"]
         modify_response = self.modify_profile(workspace_id, dir_id, values)
         after = self.get_profile_detail(workspace_id, dir_id)
