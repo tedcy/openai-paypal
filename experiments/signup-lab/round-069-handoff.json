@@ -1,0 +1,26 @@
+{
+  "round": 69,
+  "mode": "handoff",
+  "control": "single-fire Create Account action with a fresh randomized iOS session",
+  "ba_hash": "15e96bc757b6d93f",
+  "proxy_hash": "9e7f2cd640f1825b",
+  "profile_hash": "0213ee9c85b88e7b",
+  "profile_source": "created_randomized_ios",
+  "result": "SIGNUP_REQUEST_PAUSED_BEFORE_PROTOCOL_THREAD_STALL",
+  "browser_approval_status": 200,
+  "signup_request_paused_count": 1,
+  "protocol_request_sent": false,
+  "capture_records_readable": 697,
+  "capture_integrity": "supporting_evidence_process_timeout_before_ordered_close",
+  "profile_cleanup": "pending_exact_cleanup_after_process_timeout",
+  "network_environment_inspected": false,
+  "evidence": [
+    "the browser completed the page-owned Create Account and Continue actions and emitted one paused checkoutweb/signup document request",
+    "the paused request was captured before the browser sent or consumed the signup document",
+    "no protocol directory existed when the outer process timeout ended the run, proving that the Python GET had not started",
+    "the state loop called a Page API before checking the already-set paused request; a navigation paused by Fetch can block that Page call",
+    "all 697 physical JSONL lines were parseable, but the writer did not receive its ordered close because the process was externally terminated",
+    "no phone, OTP, registration, funding, or authorization action occurred"
+  ],
+  "conclusion": "Check capture.paused_signup before every Page operation and use no_wait_after=True for the email Continue that initiates signup navigation. Then retry the same Chrome 136 HTTP/1.1 handoff with a fresh SID and BA candidate one."
+}
