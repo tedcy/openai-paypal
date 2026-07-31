@@ -1,0 +1,18 @@
+{
+  "round": 13,
+  "mode": "reference",
+  "status": "ROXY_PROFILE_CREATE_LANGUAGE_REJECTED",
+  "ba_hash": "20b1939e7a12c001",
+  "proxy_hash": "1ca1868089ae2dba",
+  "country": "BA",
+  "ui_generation": "unknown",
+  "last_stage": "roxy_profile_create",
+  "evidence": [
+    "Roxy rejected the profile create payload because en-BA is not an accepted profile language value",
+    "no Roxy profile was created and no target document navigation occurred",
+    "create-time and open-time argument builders both requested --disable-http2"
+  ],
+  "dead_ends": [],
+  "next_round_focus": "map the BA Roxy profile UI language to supported en-US while retaining en-BA for task browser and protocol headers",
+  "capture_path": "captures/signup-lab/round-013-ba-http1-reference"
+}
