@@ -78,6 +78,15 @@ def main():
         ),
     )
     parser.add_argument(
+        "--handoff-header-source",
+        choices=["captured", "generated-ios136"],
+        default="captured",
+        help=(
+            "Signup handoff navigation headers: preserve the paused browser set, "
+            "or generate deterministic iOS/CriOS 136 headers while retaining Referer"
+        ),
+    )
+    parser.add_argument(
         "--lab-input-file",
         default="var/signup-lab/inputs.json",
         help="Git-ignored JSON containing BA, phone and proxy pools",
@@ -266,6 +275,7 @@ def main():
             capture_dir=args.capture_dir,
             protocol_transport=args.protocol_transport,
             handoff_cookie_source=args.handoff_cookie_source,
+            handoff_header_source=args.handoff_header_source,
             keep_profile=args.keep_roxy_profile,
             window_hold_seconds=args.roxy_window_hold_seconds,
             warmup=args.signup_lab_warmup,

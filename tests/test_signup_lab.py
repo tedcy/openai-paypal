@@ -181,6 +181,40 @@ def test_handoff_browser_jar_removes_captured_cookie_header() -> None:
     assert headers["Referer"] == "https://www.paypal.com/pay"
 
 
+def test_handoff_generated_ios_headers_keep_only_dynamic_referer() -> None:
+    headers = RoxySignupLab._handoff_headers(
+        {
+            "request": {
+                "url": "https://www.paypal.com/checkoutweb/signup?token=EC-12345678",
+                "headers": {
+                    "Accept": "captured-accept",
+                    "Referer": "https://www.paypal.com/pay?token=EC-12345678",
+                    "User-Agent": "captured-runtime-ua",
+                    "X-Captured-Only": "remove-me",
+                },
+            }
+        },
+        [],
+        cookie_source="browser-jar",
+        header_source="generated-ios136",
+    )
+
+    assert headers == {
+        "Accept": (
+            "text/html,application/xhtml+xml,application/xml;q=0.9,"
+            "image/avif,image/webp,image/apng,*/*;q=0.8,"
+            "application/signed-exchange;v=b3;q=0.7"
+        ),
+        "Upgrade-Insecure-Requests": "1",
+        "User-Agent": (
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) "
+            "AppleWebKit/605.1.15 (KHTML, like Gecko) "
+            "CriOS/136.0.7103.60 Mobile/15E148 Safari/537.36"
+        ),
+        "Referer": "https://www.paypal.com/pay?token=EC-12345678",
+    }
+
+
 def test_handoff_browser_cookie_snapshot_populates_scoped_client_jar() -> None:
     calls = []
 
@@ -227,6 +261,22 @@ def test_signup_lab_accepts_explicit_handoff_cookie_sources(
     )
 
     assert lab.handoff_cookie_source == cookie_source
+
+
+@pytest.mark.parametrize("header_source", ["captured", "generated-ios136"])
+def test_signup_lab_accepts_explicit_handoff_header_sources(
+    tmp_path, header_source: str
+) -> None:
+    lab = RoxySignupLab(
+        mode="handoff",
+        ba_token="BA-12345678ABCDEF",
+        phone="+38761123456",
+        proxy_line="proxy.test:3010:user:password",
+        capture_root=tmp_path / header_source,
+        handoff_header_source=header_source,
+    )
+
+    assert lab.handoff_header_source == header_source
 
 
 def test_paused_handoff_runs_protocol_before_resolution_without_page_access(

@@ -53,6 +53,16 @@ _INVALID_BA_MARKERS = (
 _SIGNUP_LAB_ROXY_API_TIMEOUT_SECONDS = 60.0
 _SIGNUP_LAB_NAVIGATION_TIMEOUT_SECONDS = 300.0
 _SIGNUP_LAB_INPUT_LOCK = threading.Lock()
+_SIGNUP_NAVIGATION_ACCEPT = (
+    "text/html,application/xhtml+xml,application/xml;q=0.9,"
+    "image/avif,image/webp,image/apng,*/*;q=0.8,"
+    "application/signed-exchange;v=b3;q=0.7"
+)
+_IOS_CRIOS_136_USER_AGENT = (
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) "
+    "AppleWebKit/605.1.15 (KHTML, like Gecko) "
+    "CriOS/136.0.7103.60 Mobile/15E148 Safari/537.36"
+)
 _EXISTING_PROFILE_CLEAR_ORIGINS = (
     "https://www.paypal.com",
     "https://paypal.com",
@@ -415,6 +425,7 @@ class BrowserSignupContext:
     protocol_request_completed: bool = False
     protocol_response_status: int = 0
     protocol_cookie_source: str = "captured-header"
+    protocol_header_source: str = "captured"
     paused_request_resolution: str = ""
     handoff_error_stage: str = ""
 
@@ -635,6 +646,7 @@ class RoxySignupLab:
         capture_root: str | Path,
         protocol_transport: str = "httpx",
         handoff_cookie_source: str = "captured-header",
+        handoff_header_source: str = "captured",
         keep_profile: bool = False,
         window_hold_seconds: float = 0.0,
         warmup: bool = False,
@@ -657,6 +669,10 @@ class RoxySignupLab:
             raise ValueError(
                 f"unsupported signup lab handoff Cookie source: {handoff_cookie_source}"
             )
+        if handoff_header_source not in {"captured", "generated-ios136"}:
+            raise ValueError(
+                f"unsupported signup lab handoff header source: {handoff_header_source}"
+            )
         self.mode = mode
         self.ba_token = parse_ba_token(ba_token)
         self.phone = phone
@@ -665,6 +681,7 @@ class RoxySignupLab:
         self.capture_root = Path(capture_root).expanduser().resolve()
         self.protocol_transport = protocol_transport
         self.handoff_cookie_source = handoff_cookie_source
+        self.handoff_header_source = handoff_header_source
         self.keep_profile = keep_profile
         requested_hold = max(0.0, min(float(window_hold_seconds), 3600.0))
         self.window_hold_seconds = (
@@ -1096,9 +1113,12 @@ class RoxySignupLab:
         cookies: list[dict[str, Any]],
         *,
         cookie_source: str = "captured-header",
+        header_source: str = "captured",
     ) -> dict[str, str]:
         if cookie_source not in {"captured-header", "browser-jar"}:
             raise ValueError(f"unsupported handoff Cookie source: {cookie_source}")
+        if header_source not in {"captured", "generated-ios136"}:
+            raise ValueError(f"unsupported handoff header source: {header_source}")
         request = dict(paused.get("request") or {})
         headers = {
             str(key): str(value)
@@ -1107,6 +1127,24 @@ class RoxySignupLab:
         for key in tuple(headers):
             if key.lower() == "host":
                 headers.pop(key, None)
+        if header_source == "generated-ios136":
+            referer = next(
+                (value for key, value in headers.items() if key.lower() == "referer"),
+                "",
+            )
+            captured_cookie = next(
+                (value for key, value in headers.items() if key.lower() == "cookie"),
+                "",
+            )
+            headers = {
+                "Accept": _SIGNUP_NAVIGATION_ACCEPT,
+                "Upgrade-Insecure-Requests": "1",
+                "User-Agent": _IOS_CRIOS_136_USER_AGENT,
+            }
+            if referer:
+                headers["Referer"] = referer
+            if captured_cookie:
+                headers["Cookie"] = captured_cookie
         if cookie_source == "browser-jar":
             for key in tuple(headers):
                 if key.lower() == "cookie":
@@ -1163,6 +1201,7 @@ class RoxySignupLab:
             paused,
             cookies,
             cookie_source=self.handoff_cookie_source,
+            header_source=self.handoff_header_source,
         )
         output.mkdir(parents=True, exist_ok=True)
         _write_json(
@@ -1172,6 +1211,7 @@ class RoxySignupLab:
                 "url": url,
                 "headers": headers,
                 "cookie_source": self.handoff_cookie_source,
+                "header_source": self.handoff_header_source,
                 "cookie_snapshot_count": len(cookies),
             },
         )
@@ -1217,6 +1257,7 @@ class RoxySignupLab:
         result = {
             "transport": self.protocol_transport,
             "cookie_source": self.handoff_cookie_source,
+            "header_source": self.handoff_header_source,
             "url": url,
             "status": int(response.status_code),
             "headers": response_headers,
@@ -1247,6 +1288,7 @@ class RoxySignupLab:
         context.pause_to_protocol_ms = capture.pause_elapsed_ms()
         context.protocol_request_started = True
         context.protocol_cookie_source = self.handoff_cookie_source
+        context.protocol_header_source = self.handoff_header_source
         context.stages.append(
             {
                 "time": _utc_now(),
@@ -1611,6 +1653,7 @@ class RoxySignupLab:
                 "protocol_request_completed": context_result.protocol_request_completed,
                 "protocol_response_status": context_result.protocol_response_status,
                 "protocol_cookie_source": context_result.protocol_cookie_source,
+                "protocol_header_source": context_result.protocol_header_source,
                 "paused_request_resolution": context_result.paused_request_resolution,
                 "handoff_error_stage": context_result.handoff_error_stage,
             },
@@ -2299,6 +2342,7 @@ def run_signup_lab_from_file(
     capture_dir: str | Path | None = None,
     protocol_transport: str = "httpx",
     handoff_cookie_source: str = "captured-header",
+    handoff_header_source: str = "captured",
     keep_profile: bool = False,
     window_hold_seconds: float = 0.0,
     warmup: bool = False,
@@ -2359,6 +2403,7 @@ def run_signup_lab_from_file(
             capture_root=root,
             protocol_transport=protocol_transport,
             handoff_cookie_source=handoff_cookie_source,
+            handoff_header_source=handoff_header_source,
             keep_profile=keep_profile,
             window_hold_seconds=window_hold_seconds,
             warmup=warmup,
