@@ -1,0 +1,40 @@
+{
+  "round": 27,
+  "mode": "reference",
+  "country": "BA",
+  "status": "proxy_sid_challenged",
+  "reported_failure": "ROXY_SIGNUP_REDIRECT_TIMEOUT",
+  "response_class": "APPROVAL_403_DATADOME_CAPTCHA",
+  "ba_hash": "7822effedee5dbc3",
+  "proxy_hash": "1ca1868089ae2dba",
+  "fingerprint_policy": "legacy-macos15-chrome136",
+  "finger_info_merge_source": "create_template",
+  "profile_freeze_verified": true,
+  "runtime_identity_verified": true,
+  "browser_transport": {
+    "http2_disabled": true,
+    "https_http11_responses": 11,
+    "https_h2_responses": 0,
+    "request_events": 25,
+    "response_events": 19,
+    "main_documents": [
+      "/agreements/approve:403:http/1.1",
+      "/interstitial/:200:http/1.1",
+      "/captcha/:200:http/1.1"
+    ]
+  },
+  "capture_integrity": {
+    "valid": true,
+    "records": 98,
+    "invalid_lines": 0
+  },
+  "profile_cleanup": "exact_profile_deleted_after_capture",
+  "evidence": {
+    "capture_path": "captures/signup-lab/round-027-macos-new-ba-reference",
+    "input_reassessment": "user_confirmed_proxy_sid_can_change_403_outcome"
+  },
+  "conclusion": "The newly supplied BA was exercised, but the previously fixed proxy SID received an approval challenge. Per the verified operator observation, this is a proxy-SID sample and is not evidence against the fingerprint policy.",
+  "next_round_focus": "Use the newly supplied BA proxy SID in a fresh Profile, advance the proxy cursor for every Profile, and quarantine SIDs that receive approval 403 without preflight testing.",
+  "network_preflight_used": false,
+  "signup_request_captured": false
+}
