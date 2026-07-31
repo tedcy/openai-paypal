@@ -279,6 +279,13 @@ def test_signup_lab_accepts_explicit_handoff_header_sources(
     assert lab.handoff_header_source == header_source
 
 
+def test_requested_handoff_sources_are_recorded_before_navigation() -> None:
+    source = inspect.getsource(RoxySignupLab.run)
+
+    assert "protocol_cookie_source=self.handoff_cookie_source" in source
+    assert "protocol_header_source=self.handoff_header_source" in source
+
+
 def test_paused_handoff_runs_protocol_before_resolution_without_page_access(
     tmp_path,
     monkeypatch,

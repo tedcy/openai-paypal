@@ -1378,6 +1378,8 @@ class RoxySignupLab:
             browser_force_open_requested=(False if existing_control else bool(config.force_open)),
             window_hold_seconds=self.window_hold_seconds,
             manual_navigation=self.manual_navigation,
+            protocol_cookie_source=self.handoff_cookie_source,
+            protocol_header_source=self.handoff_header_source,
         )
         if not existing_control:
             context_result.browser_create_args = _roxy_profile_startup_args(
