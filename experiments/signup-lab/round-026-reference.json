@@ -1,0 +1,39 @@
+{
+  "round": 26,
+  "mode": "reference",
+  "country": "BA",
+  "status": "invalidated_by_expired_input",
+  "reported_failure": "PAGE_CLOSED_DURING_CHALLENGE_WAIT",
+  "response_class": "APPROVAL_403_CAPTCHA",
+  "ba_hash": "20b1939e7a12c001",
+  "proxy_hash": "1ca1868089ae2dba",
+  "fingerprint_policy": "legacy-macos15-chrome136",
+  "finger_info_merge_source": "create_template",
+  "profile_freeze_verified": true,
+  "runtime_identity_verified": true,
+  "browser_transport": {
+    "http2_disabled": true,
+    "https_http11_responses": 8,
+    "https_h2_responses": 0,
+    "request_events": 10,
+    "response_events": 8,
+    "main_documents": [
+      "/agreements/approve:403:http/1.1",
+      "/captcha/:200:http/1.1"
+    ]
+  },
+  "capture_integrity": {
+    "valid": true,
+    "records": 48,
+    "invalid_lines": 0
+  },
+  "profile_cleanup": "exact_profile_deleted_after_capture",
+  "evidence": {
+    "capture_path": "captures/signup-lab/round-026-macos-reference",
+    "input_reassessment": "user_confirmed_ba_expired"
+  },
+  "conclusion": "The old BA was confirmed expired after this run. Its repeated approval challenge is therefore a confounded business-input sample and cannot reject or validate the complete fingerInfo merge hypothesis.",
+  "next_round_focus": "Repeat the unchanged fingerprint-template code and fixed proxy with the newly supplied BA hash 7822effedee5dbc3 in a fresh Profile.",
+  "network_preflight_used": false,
+  "signup_request_captured": false
+}
