@@ -863,9 +863,38 @@ class RoxySignupLab:
                     continue
                 form = page.locator('form[data-testid="emailForm"]')
                 if not form.count() and not pay_create_account_selected:
-                    if self._click_first(page, (r"create an account", r"create account")):
+                    selected_by = ""
+                    try:
+                        create_account_button = page.locator(
+                            'form[data-testid="create-account-form"] button[type="submit"]'
+                        )
+                        if (
+                            create_account_button.count()
+                            and create_account_button.first.is_visible()
+                        ):
+                            create_account_button.first.click(timeout=5000)
+                            selected_by = "create-account-form"
+                    except Exception as exc:
+                        context.stages.append(
+                            {
+                                "time": _utc_now(),
+                                "event": "pay_create_account_dom_error",
+                                "error_type": type(exc).__name__,
+                            }
+                        )
+                    if not selected_by and self._click_first(
+                        page, (r"create an account", r"create account")
+                    ):
+                        selected_by = "english-text-fallback"
+                    if selected_by:
                         pay_create_account_selected = True
-                        context.stages.append({"time": _utc_now(), "event": "pay_create_account_view_selected"})
+                        context.stages.append(
+                            {
+                                "time": _utc_now(),
+                                "event": "pay_create_account_view_selected",
+                                "selected_by": selected_by,
+                            }
+                        )
                         continue
                 email_input = form.locator('input[name="login_email"]')
                 continue_button = form.locator('button[data-testid="continueButton"]')

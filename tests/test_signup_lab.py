@@ -338,6 +338,14 @@ def test_contact_signup_stops_before_phone_submission() -> None:
     assert context.stages[-1]["reason"] == "phone_submission_out_of_scope"
 
 
+def test_signup_navigation_uses_locale_independent_create_account_control() -> None:
+    source = inspect.getsource(RoxySignupLab._drive_to_signup)
+
+    assert 'form[data-testid="create-account-form"]' in source
+    assert 'button[type="submit"]' in source
+    assert "english-text-fallback" in source
+
+
 def test_signup_lab_allows_slow_roxy_profile_startup() -> None:
     config = SimpleNamespace(
         headless=True,
