@@ -1,0 +1,24 @@
+{
+  "round": 50,
+  "mode": "reference",
+  "control": "strict no-CDP explicit navigation after removing the restored challenge tab",
+  "ba_hash": "454fb0ad09889a8a",
+  "proxy_hash": "157406d42ed3990d",
+  "device_name_hash": "0494b357579fade0",
+  "mac_hash": "6f70dfeada9dcb15",
+  "cache_clear": "roxy_native_all",
+  "cdp_connected": false,
+  "open_payload_overrides": "none",
+  "navigation_source": "visible_address_bar",
+  "result": "approval_terminal_challenge",
+  "status": "not_observed_without_cdp",
+  "profile_cleanup": "left_open_not_deleted",
+  "evidence": [
+    "the exact test Profile was closed, cleared, assigned a fresh SID, device name, and MAC, then opened without CDP",
+    "the automatically restored prior challenge tab was closed before classification",
+    "the BA URL was submitted explicitly through the visible address bar",
+    "the resulting visible document was a terminal blocked security-challenge page",
+    "no CAPTCHA or page control was used"
+  ],
+  "conclusion": "Three fresh post-success identities have now failed. Before further SID rotation, verify that Roxy actually persists API-submitted deviceName and macAddr rather than only acknowledging the mdf request."
+}
