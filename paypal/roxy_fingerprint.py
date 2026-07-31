@@ -146,6 +146,21 @@ _ROXY_TIMEZONE_VALUES: dict[str, str] = {
     "America/Chicago": "GMT-06:00 America/Chicago",
 }
 
+_ROXY_LANGUAGE_VALUES_BY_COUNTRY: dict[str, str] = {
+    # Roxy 4.x rejects en-BA in /browser/create even though it is valid for
+    # web Accept-Language. Keep the Roxy UI locale on its supported en-US
+    # value; the task CountryProfile continues to own protocol headers.
+    "BA": "en-US",
+}
+
+
+def roxy_language_value(browser_profile: Mapping[str, object] | None = None) -> str:
+    profile = browser_profile or {}
+    country = str(profile.get("country") or "").strip().upper()
+    if country in _ROXY_LANGUAGE_VALUES_BY_COUNTRY:
+        return _ROXY_LANGUAGE_VALUES_BY_COUNTRY[country]
+    return str(profile.get("language") or BROWSER_PROFILE.get("language") or "en-US")
+
 
 def roxy_timezone_value(browser_profile: Mapping[str, object] | None = None) -> str:
     """Return the Roxy appendix timezone for a supported task profile."""
@@ -378,7 +393,7 @@ def load_roxy_capture_config(
     selected_profile = dict(BROWSER_PROFILE)
     if browser_profile:
         selected_profile.update(browser_profile)
-    language = str(selected_profile.get("language") or BROWSER_PROFILE.get("language") or "en-US")
+    language = roxy_language_value(selected_profile)
     timezone = roxy_timezone_value(selected_profile)
     headless = _env_bool("PAYPAL_ROXY_HEADLESS", ROXY_HEADLESS)
     return RoxyCaptureConfig(

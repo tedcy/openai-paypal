@@ -8,6 +8,7 @@ from paypal.roxy_fingerprint import (
     RoxyApiClient,
     RoxyFingerprintError,
     load_roxy_capture_config,
+    roxy_language_value,
     roxy_timezone_value,
 )
 
@@ -43,6 +44,14 @@ def test_roxy_timezone_does_not_use_dst_offset_in_appendix_value() -> None:
 
     assert profile["timezone_offset_minutes"] == 300
     assert roxy_timezone_value(profile) == "GMT-06:00 America/Chicago"
+
+
+def test_ba_roxy_language_uses_supported_ui_value_without_changing_profile() -> None:
+    profile = browser_profile_for(profile_for_country("BA"), BROWSER_PROFILE)
+
+    assert profile["language"] == "en-BA"
+    assert roxy_language_value(profile) == "en-US"
+    assert load_roxy_capture_config(browser_profile=profile).language == "en-US"
 
 
 def test_roxy_timezone_rejects_unsupported_profile_timezone() -> None:
