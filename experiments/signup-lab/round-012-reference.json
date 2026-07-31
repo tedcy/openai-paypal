@@ -1,0 +1,20 @@
+{
+  "round": 12,
+  "mode": "reference",
+  "status": "ROXY_HTTP2_DISABLE_NOT_APPLIED",
+  "ba_hash": "20b1939e7a12c001",
+  "proxy_hash": "2fdfb6860f3e69ed",
+  "country": "US",
+  "ui_generation": "contact_signup",
+  "last_stage": "pay_checkout_signup_contact",
+  "evidence": [
+    "browser/open requested --disable-http2 and Roxy stored it in startupParam",
+    "the exact profile launchOptions.args omitted all requested custom arguments",
+    "CDP observed 380 target HTTPS responses negotiated as h2",
+    "the approval document and pay/checkout/signup/contact documents returned HTTP 200",
+    "the run is not an HTTP/1.1 reference and its elapsed time is excluded from navigation conclusions"
+  ],
+  "dead_ends": [],
+  "next_round_focus": "persist startup arguments before the first Roxy launch and establish a fresh BA-country reference",
+  "capture_path": "captures/signup-lab/round-012-http1-reference"
+}
