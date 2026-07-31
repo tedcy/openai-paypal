@@ -29,6 +29,7 @@ from paypal.roxy_fingerprint import (
     RoxyFingerprintError,
     _connect_over_cdp,
     _roxy_open_args,
+    _roxy_profile_startup_args,
     load_roxy_capture_config,
 )
 from paypal.traffic_recorder import TrafficRecorder, clear_current_traffic_recorder, set_current_traffic_recorder
@@ -178,6 +179,7 @@ class BrowserSignupContext:
     profile_id: str = ""
     profile_retained: bool = False
     same_context_page: bool = True
+    browser_create_args: list[str] = field(default_factory=list)
     browser_open_args: list[str] = field(default_factory=list)
     http2_disabled_requested: bool = False
     transport_summary: dict[str, Any] = field(default_factory=dict)
@@ -592,6 +594,7 @@ class RoxySignupLab:
             raise RoxyFingerprintError("signup lab requires fixed PAYPAL_ROXY_WORKSPACE_ID and PAYPAL_ROXY_PROJECT_ID")
         client = RoxyApiClient(config)
         context_result = BrowserSignupContext(workspace_id=config.workspace_id, project_id=config.project_id)
+        context_result.browser_create_args = _roxy_profile_startup_args(config.proxy_url)
         context_result.browser_open_args = _roxy_open_args(config.proxy_url)
         context_result.http2_disabled_requested = "--disable-http2" in context_result.browser_open_args
         profile_id = ""
@@ -722,6 +725,7 @@ class RoxySignupLab:
             "http_status": context_result.http_status,
             "classification": context_result.classification,
             "browser_transport": {
+                "create_args": context_result.browser_create_args,
                 "open_args": context_result.browser_open_args,
                 "http2_disabled_requested": context_result.http2_disabled_requested,
                 **context_result.transport_summary,

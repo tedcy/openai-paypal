@@ -592,6 +592,7 @@ class RoxyApiClient:
 
     def create_profile(self, workspace_id: int, project_id: int | None) -> str:
         proxy_info = _roxy_proxy_info(self.config.proxy_url)
+        startup_args = _roxy_profile_startup_args(self.config.proxy_url)
         payload: dict[str, Any] = {
             "workspaceId": workspace_id,
             "windowName": f"paypal-fp-{uuid.uuid4().hex[:10]}",
@@ -663,7 +664,10 @@ class RoxyApiClient:
                 "portScanList": "",
                 "useGpu": True,
                 "sandboxPermission": False,
-                "startupParam": "",
+                # Roxy 4.x snapshots startup parameters before /browser/open
+                # applies its args field. Persist them on the unopened profile
+                # as well so the first Chromium process receives the flags.
+                "startupParam": ";".join(startup_args),
             },
         }
         if self.config.core_version:
@@ -671,11 +675,12 @@ class RoxyApiClient:
         if project_id is not None:
             payload["projectId"] = project_id
         logger.debug(
-            "Creating Roxy profile workspace_id={} project_id={} proxy={} category={}",
+            "Creating Roxy profile workspace_id={} project_id={} proxy={} category={} startup_args={}",
             workspace_id,
             project_id,
             _redact_proxy_url(self.config.proxy_url) or "noproxy",
             proxy_info.get("proxyCategory"),
+            startup_args,
         )
         response = self.request("POST", "/browser/create", json=payload)
         dir_id = ((response.get("data") or {}).get("dirId") or "").strip()
@@ -845,6 +850,13 @@ def _roxy_open_args(proxy_url: object = None, base_args: Iterable[str] | None = 
     if _canonical_proxy_url(proxy_url) and "--disable-http2" not in args:
         args.append("--disable-http2")
     return args
+
+
+def _roxy_profile_startup_args(proxy_url: object = None) -> list[str]:
+    """Return create-time args only for profiles that actually use a proxy."""
+    if not _canonical_proxy_url(proxy_url):
+        return []
+    return _roxy_open_args(proxy_url)
 
 
 def roxy_browser_matches_proxy(roxy_browser: dict[str, Any], proxy_url: object = None) -> bool:
