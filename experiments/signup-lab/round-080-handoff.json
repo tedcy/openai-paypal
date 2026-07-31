@@ -1,0 +1,27 @@
+{
+  "round": 80,
+  "mode": "handoff",
+  "control": "unchanged CookieJar plus generated iOS/CriOS 136 header experiment on the next fresh Profile and SID",
+  "ba_hash": "86d9fa61df4d6bcb",
+  "proxy_hash": "de65d9efb95bd22d",
+  "profile_hash": "7cfcde24e84a2dc8",
+  "result": "APPROVAL_403_BEFORE_HEADER_EXPERIMENT_SAMPLE_2",
+  "approval_document_status": 403,
+  "http_protocol": "http/1.1",
+  "requested_protocol_cookie_source": "browser-jar",
+  "requested_protocol_header_source": "generated-ios136",
+  "request_events": 3,
+  "response_events": 2,
+  "signup_request_paused_count": 0,
+  "protocol_request_sent": false,
+  "capture_integrity": "valid_13_of_13",
+  "profile_cleanup": "retained_pending_exact_cleanup",
+  "network_environment_inspected": false,
+  "evidence": [
+    "the committed approval document returned HTTP 403 over HTTP/1.1 before any Pay or signup document",
+    "the requested CookieJar and generated header sources were recorded correctly but were never exercised",
+    "profile and runtime verification succeeded and all 13 capture records parsed contiguously",
+    "no Python signup request or out-of-scope action occurred"
+  ],
+  "conclusion": "This is consecutive pre-handoff approval-403 sample two and still provides no header-builder evidence. Quarantine only this SID, precisely clean the owned Profile, and run one final unchanged fresh-SID sample before recording a series dead end."
+}
