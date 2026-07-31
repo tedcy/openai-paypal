@@ -1,0 +1,50 @@
+{
+  "round": 32,
+  "mode": "reference",
+  "country": "BA",
+  "status": "fingerprint_confounded_sample",
+  "reported_failure": "ROXY_SIGNUP_CHALLENGED",
+  "response_class": "APPROVAL_403_CAPTCHA_WITH_RUNTIME_OS_MISMATCH",
+  "ba_hash": "7822effedee5dbc3",
+  "proxy_hash": "56d699e4f3ad65a9",
+  "fingerprint_policy": "legacy-macos15-chrome136",
+  "profile_freeze_verified": true,
+  "runtime_identity_verified": "incorrectly_true",
+  "runtime_mismatch": {
+    "user_agent_os": "Windows",
+    "navigator_platform": "MacIntel",
+    "expected_os": "macOS"
+  },
+  "browser_transport": {
+    "http2_disabled": true,
+    "https_http11_responses": 8,
+    "https_h2_responses": 0,
+    "request_events": 20,
+    "response_events": 17,
+    "loading_failed_events": 2,
+    "main_documents": [
+      "/agreements/approve:403:http/1.1",
+      "/captcha/:200:http/1.1"
+    ]
+  },
+  "capture_integrity": {
+    "valid": true,
+    "records": 76,
+    "invalid_lines": 0
+  },
+  "proxy_rotation": {
+    "selected_proxy_index": 5,
+    "next_proxy_index_after_run": 6,
+    "automatic_quarantine_reverted": true,
+    "cursor_restored_to": 5
+  },
+  "profile_cleanup": "exact_profile_deleted_after_capture",
+  "evidence": {
+    "capture_path": "captures/signup-lab/round-032-rotated-sid-reference",
+    "process_elapsed_ms": 66000
+  },
+  "conclusion": "The runtime UA identified Windows while navigator.platform identified MacIntel, but the current runtime verifier incorrectly accepted the profile. The resulting approval 403 is confounded and cannot quarantine this SID or evaluate the macOS fingerprint hypothesis.",
+  "next_round_focus": "Require a macOS UA for the macOS policy, then retry the same SID in a fresh Profile so proxy SID remains fixed while only the invalid runtime identity is corrected.",
+  "network_preflight_used": false,
+  "signup_request_captured": false
+}
