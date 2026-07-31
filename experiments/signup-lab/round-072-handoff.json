@@ -1,0 +1,22 @@
+{
+  "round": 72,
+  "mode": "handoff",
+  "control": "current second BA candidate with the next reserved SID after the paused-handoff ordering fix",
+  "ba_hash": "86d9fa61df4d6bcb",
+  "proxy_hash": "42cb8f28b9437e3d",
+  "profile_hash": "e3b0c44298fc1c14",
+  "result": "ROXY_CREATE_WINDOW_QUOTA_EXHAUSTED",
+  "http_status": 0,
+  "profile_created": false,
+  "main_document_count": 0,
+  "signup_request_paused_count": 0,
+  "protocol_request_sent": false,
+  "network_environment_inspected": false,
+  "evidence": [
+    "the fixed Roxy Local API returned a window quota error during /browser/create",
+    "no Profile ID, browser context, page, target request, or HTTP response was created",
+    "the BA therefore received no business response and remains the active candidate",
+    "the SID cursor advanced because it was reserved for this attempted Profile creation"
+  ],
+  "conclusion": "This is a local Roxy capacity failure, not BA, proxy, 403, challenge, or protocol evidence. Close only exact retained lab windows identified from local capture records, preserve their Profile data, and retry the same BA with the next fresh SID."
+}
