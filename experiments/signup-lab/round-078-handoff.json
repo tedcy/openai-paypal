@@ -1,0 +1,33 @@
+{
+  "round": 78,
+  "mode": "handoff",
+  "control": "Round 77 success baseline with only the captured Cookie header replaced by a scoped browser-snapshot CookieJar",
+  "ba_hash": "86d9fa61df4d6bcb",
+  "proxy_hash": "0b9c560733786a9a",
+  "profile_hash": "66d80c62cfb04866",
+  "result": "PROTOCOL_SIGNUP_200_BROWSER_COOKIEJAR",
+  "http_status": 200,
+  "approval_document_status": 200,
+  "signup_path": "/checkoutweb/signup",
+  "http_protocol": "http/1.1",
+  "protocol_cookie_source": "browser-jar",
+  "request_events": 160,
+  "response_events": 151,
+  "signup_request_paused_count": 1,
+  "pause_to_protocol_ms": 780,
+  "protocol_request_sent": true,
+  "protocol_response_status": 200,
+  "signup_shape": true,
+  "terminal_challenge_markers": [],
+  "capture_integrity": "valid_780_of_780",
+  "profile_cleanup": "closed_and_deleted",
+  "network_environment_inspected": false,
+  "evidence": [
+    "the paused browser request still supplied URL, Referer and UA, but its Cookie header was removed before Python dispatch",
+    "the browser Cookie snapshot was loaded into the curl_cffi client with domain and path scoping",
+    "Python curl-chrome-http1 returned HTTP 200 text/html with a valid signup application and EC context",
+    "passive authchallenge/CAPTCHA helpers remained non-terminal and all 780 capture records parsed contiguously",
+    "the exact owned Profile was deleted after the 30-second headed hold and no out-of-scope action occurred"
+  ],
+  "conclusion": "The captured Cookie header and its exact ordering are no longer required for a successful handoff. Retain the browser-snapshot CookieJar and next replace only the remaining captured navigation headers with the macOS/Chrome 136 protocol header builder."
+}
