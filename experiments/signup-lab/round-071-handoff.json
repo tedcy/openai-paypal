@@ -1,0 +1,24 @@
+{
+  "round": 71,
+  "mode": "handoff",
+  "control": "second BA candidate with a fresh randomized iOS session and SID",
+  "ba_hash": "86d9fa61df4d6bcb",
+  "proxy_hash": "cb092f0c0dcb341f",
+  "profile_hash": "ae05a56748042027",
+  "profile_source": "created_randomized_ios",
+  "result": "APPROVAL_COMMIT_TIMEOUT_WITHOUT_MAIN_DOCUMENT",
+  "http_status": 0,
+  "main_document_count": 0,
+  "signup_request_paused_count": 0,
+  "protocol_request_sent": false,
+  "capture_integrity": "valid_14_of_14",
+  "profile_cleanup": "closed_retained_pending_exact_cleanup",
+  "network_environment_inspected": false,
+  "evidence": [
+    "approval navigation ended with a browser timeout while waiting for the first document commit",
+    "no main-document response, checkoutweb/genericError navigation, or explicit invalid/expired BA marker was observed",
+    "the capture contained 14 valid and contiguous JSONL records",
+    "no signup request, Python protocol request, phone, OTP, registration, funding, or authorization action occurred"
+  ],
+  "conclusion": "This is a no-response navigation timeout, not evidence that BA candidate two is invalid. Preserve the same BA candidate, fix the known paused-navigation handoff ordering defect, and retry with a fresh randomized Profile and SID without any network preflight."
+}
