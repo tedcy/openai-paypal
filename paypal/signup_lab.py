@@ -414,6 +414,7 @@ class BrowserSignupContext:
     protocol_request_started: bool = False
     protocol_request_completed: bool = False
     protocol_response_status: int = 0
+    protocol_cookie_source: str = "captured-header"
     paused_request_resolution: str = ""
     handoff_error_stage: str = ""
 
@@ -633,6 +634,7 @@ class RoxySignupLab:
         proxy_line: str,
         capture_root: str | Path,
         protocol_transport: str = "httpx",
+        handoff_cookie_source: str = "captured-header",
         keep_profile: bool = False,
         window_hold_seconds: float = 0.0,
         warmup: bool = False,
@@ -651,6 +653,10 @@ class RoxySignupLab:
             raise ValueError(
                 f"unsupported signup lab protocol transport: {protocol_transport}"
             )
+        if handoff_cookie_source not in {"captured-header", "browser-jar"}:
+            raise ValueError(
+                f"unsupported signup lab handoff Cookie source: {handoff_cookie_source}"
+            )
         self.mode = mode
         self.ba_token = parse_ba_token(ba_token)
         self.phone = phone
@@ -658,6 +664,7 @@ class RoxySignupLab:
         self.proxy_entry = ProxyEntry.parse(proxy_line)
         self.capture_root = Path(capture_root).expanduser().resolve()
         self.protocol_transport = protocol_transport
+        self.handoff_cookie_source = handoff_cookie_source
         self.keep_profile = keep_profile
         requested_hold = max(0.0, min(float(window_hold_seconds), 3600.0))
         self.window_hold_seconds = (
@@ -1087,7 +1094,11 @@ class RoxySignupLab:
     def _handoff_headers(
         paused: Mapping[str, Any],
         cookies: list[dict[str, Any]],
+        *,
+        cookie_source: str = "captured-header",
     ) -> dict[str, str]:
+        if cookie_source not in {"captured-header", "browser-jar"}:
+            raise ValueError(f"unsupported handoff Cookie source: {cookie_source}")
         request = dict(paused.get("request") or {})
         headers = {
             str(key): str(value)
@@ -1096,6 +1107,11 @@ class RoxySignupLab:
         for key in tuple(headers):
             if key.lower() == "host":
                 headers.pop(key, None)
+        if cookie_source == "browser-jar":
+            for key in tuple(headers):
+                if key.lower() == "cookie":
+                    headers.pop(key, None)
+            return headers
         captured_cookie_key = next(
             (key for key in headers if key.lower() == "cookie"),
             "",
@@ -1111,12 +1127,54 @@ class RoxySignupLab:
             headers["Cookie"] = cookie_header
         return headers
 
+    @staticmethod
+    def _populate_cookie_jar(
+        cookie_jar: Any,
+        cookies: list[dict[str, Any]],
+    ) -> int:
+        populated = 0
+        for item in cookies:
+            name = str(item.get("name") or "")
+            if not name or item.get("value") is None:
+                continue
+            value = str(item.get("value"))
+            domain = str(item.get("domain") or "")
+            path = str(item.get("path") or "/") or "/"
+            secure = bool(item.get("secure"))
+            try:
+                cookie_jar.set(
+                    name,
+                    value,
+                    domain=domain,
+                    path=path,
+                    secure=secure,
+                )
+            except TypeError:
+                # httpx.Cookies does not expose ``secure`` in ``set``;
+                # curl_cffi does. Domain/path scoping remains identical.
+                cookie_jar.set(name, value, domain=domain, path=path)
+            populated += 1
+        return populated
+
     def _protocol_handoff(self, paused: dict[str, Any], cookies: list[dict[str, Any]], output: Path) -> dict[str, Any]:
         request = dict(paused.get("request") or {})
         url = str(request.get("url") or "")
-        headers = self._handoff_headers(paused, cookies)
+        headers = self._handoff_headers(
+            paused,
+            cookies,
+            cookie_source=self.handoff_cookie_source,
+        )
         output.mkdir(parents=True, exist_ok=True)
-        _write_json(output / "request.json", {"method": "GET", "url": url, "headers": headers})
+        _write_json(
+            output / "request.json",
+            {
+                "method": "GET",
+                "url": url,
+                "headers": headers,
+                "cookie_source": self.handoff_cookie_source,
+                "cookie_snapshot_count": len(cookies),
+            },
+        )
         if self.protocol_transport in {"curl-chrome", "curl-chrome-http1"}:
             try:
                 from curl_cffi import CurlHttpVersion
@@ -1125,6 +1183,8 @@ class RoxySignupLab:
                 raise RuntimeError("curl_cffi is required for curl-chrome transport") from exc
             client: Any = CurlSession(impersonate="chrome136")
             client.proxies = {"http": self.proxy_entry.url, "https": self.proxy_entry.url}
+            if self.handoff_cookie_source == "browser-jar":
+                self._populate_cookie_jar(client.cookies, cookies)
             request_options: dict[str, Any] = {}
             if self.protocol_transport == "curl-chrome-http1":
                 request_options["http_version"] = CurlHttpVersion.V1_1
@@ -1146,6 +1206,8 @@ class RoxySignupLab:
                 http2=self.protocol_transport == "httpx",
                 trust_env=False,
             ) as client:
+                if self.handoff_cookie_source == "browser-jar":
+                    self._populate_cookie_jar(client.cookies, cookies)
                 response = client.get(url, headers=headers)
                 body = response.text
                 response_headers = dict(response.headers)
@@ -1154,6 +1216,7 @@ class RoxySignupLab:
         classification = classify_signup_document(int(response.status_code), content_type, body, url)
         result = {
             "transport": self.protocol_transport,
+            "cookie_source": self.handoff_cookie_source,
             "url": url,
             "status": int(response.status_code),
             "headers": response_headers,
@@ -1183,6 +1246,7 @@ class RoxySignupLab:
         )
         context.pause_to_protocol_ms = capture.pause_elapsed_ms()
         context.protocol_request_started = True
+        context.protocol_cookie_source = self.handoff_cookie_source
         context.stages.append(
             {
                 "time": _utc_now(),
@@ -1546,6 +1610,7 @@ class RoxySignupLab:
                 "protocol_request_started": context_result.protocol_request_started,
                 "protocol_request_completed": context_result.protocol_request_completed,
                 "protocol_response_status": context_result.protocol_response_status,
+                "protocol_cookie_source": context_result.protocol_cookie_source,
                 "paused_request_resolution": context_result.paused_request_resolution,
                 "handoff_error_stage": context_result.handoff_error_stage,
             },
@@ -2233,6 +2298,7 @@ def run_signup_lab_from_file(
     input_file: str | Path,
     capture_dir: str | Path | None = None,
     protocol_transport: str = "httpx",
+    handoff_cookie_source: str = "captured-header",
     keep_profile: bool = False,
     window_hold_seconds: float = 0.0,
     warmup: bool = False,
@@ -2292,6 +2358,7 @@ def run_signup_lab_from_file(
             proxy_line=proxy,
             capture_root=root,
             protocol_transport=protocol_transport,
+            handoff_cookie_source=handoff_cookie_source,
             keep_profile=keep_profile,
             window_hold_seconds=window_hold_seconds,
             warmup=warmup,

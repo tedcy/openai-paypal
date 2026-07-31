@@ -162,6 +162,73 @@ def test_handoff_cookie_snapshot_fallback_preserves_snapshot_order() -> None:
     assert headers["Cookie"] == "second=2; first=1"
 
 
+def test_handoff_browser_jar_removes_captured_cookie_header() -> None:
+    headers = RoxySignupLab._handoff_headers(
+        {
+            "request": {
+                "url": "https://www.paypal.com/checkoutweb/signup?token=EC-12345678",
+                "headers": {
+                    "cookie": "captured=browser",
+                    "Referer": "https://www.paypal.com/pay",
+                },
+            }
+        },
+        [{"name": "jar", "value": "value"}],
+        cookie_source="browser-jar",
+    )
+
+    assert not any(key.lower() == "cookie" for key in headers)
+    assert headers["Referer"] == "https://www.paypal.com/pay"
+
+
+def test_handoff_browser_cookie_snapshot_populates_scoped_client_jar() -> None:
+    calls = []
+
+    class CookieJar:
+        @staticmethod
+        def set(name, value, **kwargs):
+            calls.append((name, value, kwargs))
+
+    populated = RoxySignupLab._populate_cookie_jar(
+        CookieJar(),
+        [
+            {
+                "name": "session",
+                "value": "value",
+                "domain": ".paypal.com",
+                "path": "/checkoutweb",
+                "secure": True,
+            },
+            {"name": "", "value": "ignored"},
+        ],
+    )
+
+    assert populated == 1
+    assert calls == [
+        (
+            "session",
+            "value",
+            {"domain": ".paypal.com", "path": "/checkoutweb", "secure": True},
+        )
+    ]
+
+
+@pytest.mark.parametrize("cookie_source", ["captured-header", "browser-jar"])
+def test_signup_lab_accepts_explicit_handoff_cookie_sources(
+    tmp_path, cookie_source: str
+) -> None:
+    lab = RoxySignupLab(
+        mode="handoff",
+        ba_token="BA-12345678ABCDEF",
+        phone="+38761123456",
+        proxy_line="proxy.test:3010:user:password",
+        capture_root=tmp_path / cookie_source,
+        handoff_cookie_source=cookie_source,
+    )
+
+    assert lab.handoff_cookie_source == cookie_source
+
+
 def test_paused_handoff_runs_protocol_before_resolution_without_page_access(
     tmp_path,
     monkeypatch,
