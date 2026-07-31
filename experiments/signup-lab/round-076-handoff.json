@@ -1,0 +1,27 @@
+{
+  "round": 76,
+  "mode": "handoff",
+  "control": "current active BA with a fresh randomized iOS Profile, fresh SID and unchanged curl-chrome-http1 handoff",
+  "ba_hash": "86d9fa61df4d6bcb",
+  "proxy_hash": "a423202e048484a3",
+  "profile_hash": "adc7ab5967d93842",
+  "result": "APPROVAL_403_TERMINAL_CHALLENGE_SAMPLE_1",
+  "http_status": 0,
+  "approval_document_status": 403,
+  "http_protocol": "http/1.1",
+  "request_events": 53,
+  "response_events": 27,
+  "signup_request_paused_count": 0,
+  "protocol_request_sent": false,
+  "capture_integrity": "valid_177_of_177",
+  "profile_cleanup": "retained_pending_exact_cleanup",
+  "network_environment_inspected": false,
+  "evidence": [
+    "profile freeze and CDP runtime verification both accepted the randomized iOS 18 / CriOS 136 identity",
+    "the committed approval document returned HTTP 403 over HTTP/1.1 and was followed by interstitial/challenge documents",
+    "the same Page remained visible for the configured 30-second post-result hold",
+    "all 177 CDP JSONL records parsed and the sequence was contiguous",
+    "no signup pause, Python request, phone, OTP, registration, funding or authorization action occurred"
+  ],
+  "conclusion": "This is the first current-series approval-403 sample and does not switch BA. Quarantine only this SID, precisely clean the owned Profile, and repeat with the next fresh SID before drawing a dead-end conclusion."
+}
