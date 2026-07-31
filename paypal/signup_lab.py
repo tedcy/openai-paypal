@@ -611,6 +611,15 @@ class RoxySignupLab:
     def _challenge_evidence(self, page: Any, capture: CdpCapture, body: str) -> tuple[list[str], list[str]]:
         terminal = [marker for marker in _CHALLENGE_MARKERS if marker in body.lower()]
         observed: list[str] = []
+        for document in getattr(capture, "main_documents", []):
+            if not isinstance(document, Mapping):
+                continue
+            path = str(document.get("path") or "").lower().rstrip("/")
+            status = int(document.get("status") or 0)
+            if path == "/agreements/approve" and status == 403:
+                terminal.append("approval_http_403")
+            if path == "/captcha" or "authchallenge" in path or "datadome" in path:
+                terminal.append("challenge_document")
         url_lower = page.url.lower()
         if any(marker in url_lower for marker in ("authchallenge", "/captcha/", "datadome")):
             terminal.append("challenge_url")

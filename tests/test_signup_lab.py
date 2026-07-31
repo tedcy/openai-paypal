@@ -516,12 +516,52 @@ def test_passive_challenge_signals_are_observed_but_not_terminal() -> None:
         "url": "https://www.paypal.com/pay",
         "context": type("Context", (), {"cookies": lambda self: [{"name": "tsrce", "value": "authchallengenodeweb"}]})(),
     })()
-    capture = type("Capture", (), {"challenge_urls": ["https://www.paypal.com/auth/createchallenge/x/hcaptchapassive.js"]})()
+    capture = type(
+        "Capture",
+        (),
+        {
+            "challenge_urls": ["https://www.paypal.com/auth/createchallenge/x/hcaptchapassive.js"],
+            "main_documents": [
+                {
+                    "path": "/web/res/hash/hcaptcha/hcaptchapassive.html",
+                    "status": 200,
+                }
+            ],
+        },
+    )()
 
     terminal, observed = lab._challenge_evidence(page, capture, "ordinary pay page")
 
     assert terminal == []
     assert observed == ["tsrce_authchallenge", "passive_challenge_network"]
+
+
+def test_approval_403_and_captcha_document_are_terminal_challenge_evidence() -> None:
+    lab = object.__new__(RoxySignupLab)
+    page = type(
+        "Page",
+        (),
+        {
+            "url": "https://www.paypal.com/agreements/approve?ba_token=REDACTED",
+            "context": type("Context", (), {"cookies": lambda self: []})(),
+        },
+    )()
+    capture = type(
+        "Capture",
+        (),
+        {
+            "challenge_urls": ["https://www.paypal.com/captcha/"],
+            "main_documents": [
+                {"path": "/agreements/approve", "status": 403},
+                {"path": "/captcha/", "status": 200},
+            ],
+        },
+    )()
+
+    terminal, observed = lab._challenge_evidence(page, capture, "")
+
+    assert terminal == ["approval_http_403", "challenge_document"]
+    assert observed == ["passive_challenge_network"]
 
 
 def test_pay_stage_uses_exact_application_email_form() -> None:
