@@ -1,0 +1,25 @@
+{
+  "round": 75,
+  "mode": "handoff",
+  "control": "current active BA with the 300-second navigation budget, fresh randomized iOS Profile, fresh SID, and curl-chrome-http1 handoff",
+  "ba_hash": "86d9fa61df4d6bcb",
+  "proxy_hash": "b170ad567bb537c7",
+  "profile_hash": "e9313f0e5a9cbe58",
+  "result": "EXTERNAL_RUNNER_TIMEOUT_AFTER_PAY_REACHED",
+  "http_status": 0,
+  "approval_document_status": "committed_before_pay",
+  "final_observed_stage": "pay",
+  "signup_request_paused_count": 0,
+  "protocol_request_sent": false,
+  "capture_integrity": "not_finalized_after_external_termination",
+  "profile_cleanup": "retained_pending_exact_cleanup",
+  "network_environment_inspected": false,
+  "evidence": [
+    "the new Profile was created and the headed browser reached approval only near the outer runner deadline",
+    "after browser startup, the same Page moved from approval to /pay in roughly two seconds",
+    "the /pay control snapshot contained the visible application email field and visible Create an Account submit control",
+    "the outer 10-minute command limit terminated the process before the next action, so the CDP writer could not drain and no final checkpoint was produced",
+    "no signup pause, Python request, phone, OTP, registration, funding, or authorization action occurred"
+  ],
+  "conclusion": "The BA remains active and the navigation code reached a healthy Pay page. Do not change headers, controls, BA, or proxy rules; precisely clean this owned Profile and repeat with a runner timeout that covers slow Roxy Profile startup plus the full navigation budget."
+}
