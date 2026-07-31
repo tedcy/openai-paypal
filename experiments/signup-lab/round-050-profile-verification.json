@@ -1,0 +1,24 @@
+{
+  "related_round": 50,
+  "mode": "local_profile_verification",
+  "profile_hash": "0dbf7ed4eeadd97f",
+  "device_name_expected_hash": "0494b357579fade0",
+  "device_name_ui_hash": "0494b357579fade0",
+  "device_name_match": true,
+  "mac_mode": "custom_nonempty",
+  "fingerprint_policy": {
+    "os": "macOS 15",
+    "browser": "RoxyChrome 136",
+    "webrtc": "replace",
+    "startup_http2_disabled": true
+  },
+  "network_environment_inspected": false,
+  "evidence": [
+    "the Roxy edit screen showed the API-submitted device name and its hash matched exactly",
+    "the MAC control was set to custom and displayed a non-empty address",
+    "the persisted startup parameters included disable-http2",
+    "the shared macOS 15, Chrome 136, and WebRTC replacement policy remained active",
+    "the Profile was inspected without saving or changing any field"
+  ],
+  "conclusion": "The Local API mdf acknowledgement corresponds to persisted identity state. Continue testing SID/session rotation rather than treating deviceName or macAddr as ignored fields."
+}
