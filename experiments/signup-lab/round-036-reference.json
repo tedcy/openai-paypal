@@ -1,0 +1,71 @@
+{
+  "round": 36,
+  "mode": "reference",
+  "country": "BA",
+  "status": "approval_challenged_profile_configuration_confound",
+  "reported_failure": "ROXY_SIGNUP_CHALLENGED",
+  "response_class": "APPROVAL_403_INTERSTITIAL_CAPTCHA",
+  "ba_hash": "7822effedee5dbc3",
+  "proxy_hash": "8c91cf485475cd10",
+  "fingerprint_policy": "legacy-macos15-chrome136",
+  "profile_freeze_verified": true,
+  "runtime_identity_verified": true,
+  "runtime_normalizations": [
+    "outer_width_window_frame",
+    "outer_height_clamped_to_screen"
+  ],
+  "window_lifecycle": {
+    "headed": true,
+    "force_open_requested": true,
+    "hold_seconds": 120,
+    "hold_completed": false,
+    "termination": "user_closed_window",
+    "cdp_error": "TargetClosedError"
+  },
+  "browser_transport": {
+    "http2_disabled": true,
+    "https_http11_responses": 9,
+    "https_h2_responses": 0,
+    "request_events": 13,
+    "response_events": 9,
+    "loading_failed_events": 4,
+    "main_documents": [
+      "/agreements/approve:403:http/1.1",
+      "/interstitial/:200:http/1.1",
+      "/captcha/:200:http/1.1"
+    ]
+  },
+  "capture_integrity": {
+    "valid": true,
+    "records": 58,
+    "invalid_lines": 0
+  },
+  "stage_timing": {
+    "approval_to_hold_ms": 5564,
+    "hold_terminated_ms": 19904
+  },
+  "profile_ui_comparison": {
+    "automatic_profile": [
+      "hardware and memory overrides absent",
+      "custom language, timezone, geolocation, and resolution",
+      "geolocation permission prompt",
+      "random fonts",
+      "do-not-track disabled"
+    ],
+    "manual_test_profile": [
+      "12 hardware threads and 8 GB memory",
+      "language, timezone, and geolocation based on proxy IP",
+      "geolocation permission allowed",
+      "system resolution and fonts",
+      "do-not-track enabled"
+    ]
+  },
+  "profile_cleanup": "exact_round_profile_closed_and_deleted; manual_test_profile_untouched",
+  "evidence": {
+    "capture_path": "captures/signup-lab/round-036-headed-hold-reference"
+  },
+  "conclusion": "The headed HTTP/1.1 run reached an approval 403 followed by interstitial and CAPTCHA documents. The manual and automatic Roxy configuration screenshots expose material browser-visible policy differences, so this result must not be treated as evidence that the proxy SID alone caused the challenge.",
+  "next_round_focus": "Align a fresh automatic Profile with the working manual test policy, verify the resulting JavaScript and permission values before navigation, and then run one new reference without changing the navigation state machine.",
+  "network_preflight_used": false,
+  "signup_request_captured": false
+}
