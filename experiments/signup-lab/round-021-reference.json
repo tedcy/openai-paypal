@@ -1,0 +1,39 @@
+{
+  "round": 21,
+  "mode": "reference",
+  "country": "BA",
+  "status": "failed_before_open",
+  "failure": "ROXY_PROFILE_POLICY_MISMATCH",
+  "ba_hash": "20b1939e7a12c001",
+  "proxy_hash": "1ca1868089ae2dba",
+  "fingerprint_policy": "legacy-macos15-chrome136",
+  "target_document_requests": 0,
+  "profile_retained": true,
+  "evidence": {
+    "create_payload": {
+      "core": "Chrome/136",
+      "os": "macOS/15",
+      "web_rtc_mode": 0,
+      "headed": true,
+      "http2_disabled": true,
+      "window_size": "1000x1000"
+    },
+    "roxy_version": "4.0.0",
+    "detail_shape": "summary_without_fingerInfo",
+    "observed_os_version_after_modify": "15.2",
+    "generated_user_agent_before_modify": "macOS Chrome 136",
+    "generated_user_agent_preserved_after_modify": false,
+    "capture_path": "captures/signup-lab/round-021-macos-reference"
+  },
+  "conclusion": "Roxy 4.0 detail omits fingerInfo and normalizes macOS 15 to a 15.x minor. The current partial mdf payload must preserve the generated top-level userAgent, and fields absent from detail must be recorded as unobservable rather than treated as contradictory.",
+  "next_round_focus": "Preserve the generated UA in mdf, verify visible fields by major version, record unobservable fingerInfo fields, then require CDP runtime verification before first target navigation.",
+  "ctf_mcp": {
+    "knowledge": [
+      "07-client/js-runtime.md",
+      "01-recon/captcha-bypass.md",
+      "02-auth/jwt/07-theft-replay.md"
+    ],
+    "autopilot": "timeout_after_8s",
+    "network_tools_used": false
+  }
+}
