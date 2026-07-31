@@ -1,0 +1,24 @@
+{
+  "round": 44,
+  "mode": "reference",
+  "control": "clean existing test profile with refreshed device name, MAC, and SID",
+  "ba_hash": "454fb0ad09889a8a",
+  "proxy_hash": "69bcae0a89e6f8b8",
+  "device_name_hash": "220e73efdbd88c64",
+  "mac_hash": "1886f8978c396459",
+  "result": "approval_terminal_challenge",
+  "approval_status": 403,
+  "protocol": "http/1.1",
+  "request_events": 23,
+  "response_events": 20,
+  "capture_integrity": "92_of_92_jsonl_records_valid",
+  "profile_cleanup": "closed_not_deleted",
+  "evidence": [
+    "Roxy acknowledged a partial profile update containing deviceName, macAddr, deviceNameSwitch, macInfo, and a changed HTTP proxy SID",
+    "local Roxy cache evidence confirms that the manual UI uses deviceName and macAddr field names",
+    "the profile was cleared before address-bar navigation and retained macOS 15 with Chrome 136",
+    "the approval main document returned HTTP 403 and proceeded through interstitial and CAPTCHA documents",
+    "the run did not interact with the CAPTCHA or submit signup data"
+  ],
+  "conclusion": "This identity-and-SID combination remained challenged. Per the SID rotation rule, the refreshed identity should be retained while one additional SID is tested before treating the identity hypothesis as a dead end."
+}
