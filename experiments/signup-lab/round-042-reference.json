@@ -1,0 +1,18 @@
+{
+  "round": 42,
+  "mode": "reference",
+  "control": "clean existing test profile with address-bar observer",
+  "ba_hash": "7822effedee5dbc3",
+  "result": "capture_aborted_before_target_navigation",
+  "http_status": 0,
+  "request_events": 0,
+  "response_events": 0,
+  "capture_integrity": "valid_empty_capture",
+  "profile_cleanup": "closed_not_deleted",
+  "evidence": [
+    "the observer reached about:blank after clearing cookies, cache, origin storage, and service workers",
+    "the Roxy page or browser closed before an address-bar navigation was observed",
+    "no approval request was emitted, so this round provides no evidence about BA validity, proxy behavior, or HTTP 403"
+  ],
+  "conclusion": "Round 42 is an orchestration failure rather than a target result. It must not be compared with the earlier 403 captures."
+}
