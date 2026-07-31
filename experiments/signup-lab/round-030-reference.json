@@ -1,0 +1,46 @@
+{
+  "round": 30,
+  "mode": "reference",
+  "country": "BA",
+  "status": "proxy_sid_challenged_and_quarantined",
+  "reported_failure": "PAGE_GOTO_TIMEOUT_AFTER_APPROVAL_403",
+  "response_class": "APPROVAL_403",
+  "ba_hash": "7822effedee5dbc3",
+  "proxy_hash": "c3192b0c2dad12ff",
+  "fingerprint_policy": "legacy-macos15-chrome136",
+  "finger_info_merge_source": "create_template",
+  "profile_freeze_verified": true,
+  "runtime_identity_verified": true,
+  "browser_transport": {
+    "http2_disabled": true,
+    "https_http11_responses": 1,
+    "https_h2_responses": 0,
+    "request_events": 2,
+    "response_events": 1,
+    "loading_failed_events": 1,
+    "main_documents": [
+      "/agreements/approve:403:http/1.1"
+    ]
+  },
+  "capture_integrity": {
+    "valid": true,
+    "records": 7,
+    "invalid_lines": 0
+  },
+  "proxy_rotation": {
+    "selected_proxy_index": 3,
+    "next_proxy_index": 4,
+    "quarantined_proxy_count_before": 3,
+    "approval_403_quarantined": true,
+    "quarantine_added": true
+  },
+  "profile_cleanup": "exact_profile_deleted_after_capture",
+  "evidence": {
+    "capture_path": "captures/signup-lab/round-030-rotated-sid-reference",
+    "process_elapsed_ms": 70400
+  },
+  "conclusion": "This fresh Profile and SID received approval 403 and was quarantined. The CDP response arrived before DOMContentLoaded, but page.goto waited for its 45-second timeout; this is a local termination-latency defect and does not change the proxy-SID response classification.",
+  "next_round_focus": "Make approval-403 cancellation interrupt a pending navigation without changing the fingerprint or request, then retry with the next non-quarantined SID and a fresh Profile.",
+  "network_preflight_used": false,
+  "signup_request_captured": false
+}
