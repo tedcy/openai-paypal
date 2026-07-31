@@ -1,0 +1,40 @@
+{
+  "round": 66,
+  "mode": "reference",
+  "control": "first complete randomized iOS reference after dedicated-Page alignment",
+  "ba_hash": "15e96bc757b6d93f",
+  "proxy_hash": "c596741492ba9f52",
+  "profile_hash": "45ab270b49ce3f45",
+  "profile_source": "created_randomized_ios",
+  "result": "LEGACY_CHECKOUTWEB_SIGNUP_200_PASSIVE_MARKER_MISCLASSIFICATION",
+  "http_status": 200,
+  "ui_generation": "legacy_checkoutweb",
+  "transport": "http/1.1",
+  "capture_integrity": "valid_957_of_957",
+  "main_documents": [
+    {"path": "/agreements/approve", "status": 200},
+    {"path": "/web/res/<hash>/hcaptcha/hcaptchapassive.html", "status": 200},
+    {"path": "/checkoutweb/signup", "status": 200}
+  ],
+  "page_lifecycle": {
+    "startup_pages_closed": 2,
+    "dedicated_page_created": true,
+    "same_page_navigation": true
+  },
+  "signup_classification": {
+    "signup_shape": true,
+    "passive_markers": ["authchallenge", "captcha"],
+    "terminal_challenge_document": false,
+    "current_classifier_valid": false
+  },
+  "profile_cleanup": "closed_retained_pending_exact_cleanup",
+  "network_environment_inspected": false,
+  "evidence": [
+    "the randomized iOS Profile completed approval, Create Account and email Continue on one dedicated Page",
+    "approval and checkoutweb/signup both returned HTTP 200 over HTTP/1.1",
+    "the final URL generation was legacy_checkoutweb and the HTML matched the signup application shape",
+    "the only hCaptcha document was the passive helper resource; no terminal CAPTCHA or authchallenge main document was observed",
+    "all 957 JSONL capture records verified and no phone, OTP, registration form, funding, or authorization submission occurred"
+  ],
+  "conclusion": "Accept this as the first valid browser reference milestone. Refine signup classification so passive embedded markers do not override a healthy checkoutweb/signup 200 document, then start a fresh-session paused-request handoff while retaining BA candidate one."
+}
