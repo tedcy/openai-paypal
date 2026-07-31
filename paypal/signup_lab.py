@@ -49,6 +49,12 @@ _INVALID_BA_MARKERS = (
     "expired ba token",
 )
 _SIGNUP_LAB_ROXY_API_TIMEOUT_SECONDS = 60.0
+_COUNTRY_SELECTION_LABELS: dict[str, tuple[str, ...]] = {
+    "BR": (r"Brazil", r"\+55"),
+    "TH": (r"Thailand", r"\+66"),
+    "BA": (r"Bosnia(?:\s*(?:and|&|-)\s*)Herzegovina", r"\+387"),
+    "US": (r"United States", r"\+1"),
+}
 
 
 def _utc_now() -> str:
@@ -406,6 +412,83 @@ class RoxySignupLab:
         )
         context.stages.append({"time": _utc_now(), "event": "controls_captured", "stage": stage})
 
+    def _select_task_country(self, page: Any, context: BrowserSignupContext) -> None:
+        expected_prefix = self.country_profile.dial_prefix
+        country_code = self.country_profile.country
+        code_input = page.locator('input[name="login_phone_country_code"]')
+        try:
+            current_prefix = (
+                str(code_input.first.input_value(timeout=1500)).strip()
+                if code_input.count()
+                else ""
+            )
+        except Exception:
+            current_prefix = ""
+        if current_prefix == expected_prefix:
+            context.stages.append(
+                {
+                    "time": _utc_now(),
+                    "event": "pay_country_already_selected",
+                    "country": country_code,
+                }
+            )
+            return
+
+        control = page.get_by_role(
+            "button",
+            name=re.compile(r"country(?:\s+or\s+region)?\s+select", re.I),
+        )
+        try:
+            if not control.count() or not control.first.is_visible():
+                raise RuntimeError("ROXY_COUNTRY_CONTROL_MISSING")
+            control.first.click(timeout=5000)
+            page.wait_for_timeout(350)
+        except RuntimeError:
+            raise
+        except Exception as exc:
+            raise RuntimeError("ROXY_COUNTRY_CONTROL_MISSING") from exc
+
+        patterns = _COUNTRY_SELECTION_LABELS.get(country_code, ())
+        selected = False
+        for label in patterns:
+            matcher = re.compile(label, re.I)
+            candidates = (
+                page.get_by_role("option", name=matcher),
+                page.get_by_role("menuitem", name=matcher),
+                page.get_by_role("button", name=matcher),
+                page.get_by_text(matcher, exact=False),
+            )
+            for locator in candidates:
+                try:
+                    if locator.count() and locator.first.is_visible():
+                        locator.first.click(timeout=5000)
+                        selected = True
+                        break
+                except Exception:
+                    continue
+            if selected:
+                break
+        if not selected:
+            self._capture_controls(page, context, "pay_country_option_missing")
+            raise RuntimeError("ROXY_COUNTRY_OPTION_MISSING")
+
+        try:
+            page.wait_for_function(
+                "expected => document.querySelector('input[name=login_phone_country_code]')?.value === expected",
+                expected_prefix,
+                timeout=8000,
+            )
+        except Exception as exc:
+            self._capture_controls(page, context, "pay_country_selection_unconfirmed")
+            raise RuntimeError("ROXY_COUNTRY_SELECTION_UNCONFIRMED") from exc
+        context.stages.append(
+            {
+                "time": _utc_now(),
+                "event": "pay_country_selected",
+                "country": country_code,
+            }
+        )
+
     def _challenge_evidence(self, page: Any, capture: CdpCapture, body: str) -> tuple[list[str], list[str]]:
         terminal = [marker for marker in _CHALLENGE_MARKERS if marker in body.lower()]
         observed: list[str] = []
@@ -498,6 +581,11 @@ class RoxySignupLab:
                 # The login and create-account views share /pay. Switch the
                 # DOM view once, then submit the app-owned email form once.
                 if time.monotonic() - stage_entered_at[stage] < 4.0:
+                    continue
+                if "pay_country_selected" not in completed_actions:
+                    self._select_task_country(page, context)
+                    completed_actions.add("pay_country_selected")
+                    stage_entered_at[stage] = time.monotonic()
                     continue
                 form = page.locator('form[data-testid="emailForm"]')
                 if not form.count() and not pay_create_account_selected:
