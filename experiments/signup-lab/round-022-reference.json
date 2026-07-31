@@ -1,0 +1,21 @@
+{
+  "round": 22,
+  "mode": "reference",
+  "country": "BA",
+  "status": "failed_before_profile_creation",
+  "failure": "ROXY_PROFILE_QUOTA_EXHAUSTED",
+  "ba_hash": "20b1939e7a12c001",
+  "proxy_hash": "1ca1868089ae2dba",
+  "fingerprint_policy": "legacy-macos15-chrome136",
+  "target_document_requests": 0,
+  "profile_created": false,
+  "profile_retained": false,
+  "evidence": {
+    "roxy_endpoint": "/browser/create",
+    "roxy_error_class": "explicit_profile_quota",
+    "capture_path": "captures/signup-lab/round-022-macos-reference"
+  },
+  "conclusion": "The run did not exercise the Round 22 fingerprint hypothesis because Roxy rejected profile creation with an explicit quota error. This is a resource condition and does not justify reverting the code experiment.",
+  "next_round_focus": "Delete only the exact retained Round 21 Profile after preserving its evidence, then repeat the same code/BA/proxy experiment with a fresh Profile.",
+  "network_preflight_used": false
+}
