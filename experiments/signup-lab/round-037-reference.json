@@ -1,0 +1,68 @@
+{
+  "round": 37,
+  "mode": "reference",
+  "country": "BA",
+  "status": "pre_navigation_runtime_gate_dnt_unobservable",
+  "reported_failure": "ROXY_RUNTIME_FINGERPRINT_MISMATCH",
+  "response_class": "INTERNAL_PAGE_DNT_UNOBSERVABLE",
+  "ba_hash": "7822effedee5dbc3",
+  "proxy_hash": "e8acaa8055a8bc60",
+  "fingerprint_policy": "manual-test-macos15-chrome136",
+  "profile_freeze_verified": true,
+  "runtime_identity_verified": false,
+  "runtime_observed": {
+    "headed": true,
+    "chrome_major": 136,
+    "platform": "MacIntel",
+    "language": "bs-BA",
+    "timezone": "Europe/Sarajevo",
+    "hardware_concurrency": 12,
+    "device_memory_gb": 8,
+    "geolocation_permission": "granted",
+    "screen": "2048x1152",
+    "do_not_track": "unobservable_on_internal_page"
+  },
+  "runtime_mismatches": [
+    "do_not_track"
+  ],
+  "runtime_normalizations": [
+    "outer_width_window_frame",
+    "outer_height_window_frame"
+  ],
+  "window_lifecycle": {
+    "headed": true,
+    "force_open_requested": true,
+    "hold_seconds": 120,
+    "hold_completed": true
+  },
+  "browser_transport": {
+    "http2_disabled_requested": true,
+    "https_http11_responses": 0,
+    "https_h2_responses": 0,
+    "request_events": 0,
+    "response_events": 1,
+    "loading_failed_events": 0,
+    "main_documents": [
+      "/one-google-bar:200:chrome-untrusted"
+    ]
+  },
+  "capture_integrity": {
+    "valid": true,
+    "records": 1,
+    "invalid_lines": 0
+  },
+  "target_navigation_started": false,
+  "proxy_rotation": {
+    "selected_proxy_index": 9,
+    "next_proxy_index": 10,
+    "approval_403_quarantined": false
+  },
+  "profile_cleanup": "exact_round_profile_closed_and_deleted; manual_test_profile_untouched",
+  "evidence": {
+    "capture_path": "captures/signup-lab/round-037-manual-test-parity-reference"
+  },
+  "conclusion": "The manual-test parity fields reached the browser runtime before target navigation: IP-derived BA language and timezone, 12 hardware threads, 8 GB memory, granted geolocation permission, and system screen dimensions were all observed. navigator.doNotTrack was empty on the Chrome internal new-tab document, so treating it as a hard pre-navigation mismatch prevented any target request and is not valid evidence about the HTTPS document or DNT request header.",
+  "next_round_focus": "Keep recording DNT, but classify an empty value on the initial internal page as unobservable; repeat with a fresh Profile and SID so the first target document can provide the actual response and request-header evidence.",
+  "network_preflight_used": false,
+  "signup_request_captured": false
+}
