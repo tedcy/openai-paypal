@@ -1,0 +1,23 @@
+{
+  "round": 70,
+  "mode": "handoff",
+  "control": "paused-state-first handoff retry with BA candidate one",
+  "ba_hash": "15e96bc757b6d93f",
+  "proxy_hash": "05560eea0295b214",
+  "profile_hash": "1839ba5ececa77e0",
+  "profile_source": "created_randomized_ios",
+  "result": "BA_CANDIDATE_ONE_CHECKOUTWEB_GENERIC_ERROR",
+  "http_status": 200,
+  "final_path": "/checkoutweb/genericError",
+  "protocol_request_sent": false,
+  "capture_integrity": "valid_19_of_19",
+  "profile_cleanup": "closed_retained_pending_exact_cleanup",
+  "network_environment_inspected": false,
+  "evidence": [
+    "the coherent randomized iOS runtime passed and all target HTTPS responses used HTTP/1.1",
+    "approval entered checkoutweb/genericError before any signup request could be paused",
+    "all 19 capture records verified",
+    "no Python protocol request, phone, OTP, registration, funding, or authorization action occurred"
+  ],
+  "conclusion": "Apply the operator-defined failover rule: switch from BA hash 15e96bc757b6d93f to the second supplied BA candidate, create a fresh Profile with a new SID, and stop if that candidate also enters genericError."
+}
