@@ -1,0 +1,38 @@
+{
+  "round": 57,
+  "mode": "approval-control",
+  "control": "single confirmation replay of the old BA in a fresh SID/session",
+  "ba_hash": "454fb0ad09889a8a",
+  "proxy_hash": "1e37c46e723cfc0a",
+  "profile_hash": "ee3917e3ec1305dc",
+  "proxy_cursor": {
+    "selected": 25,
+    "next": 26,
+    "quarantined": true
+  },
+  "fingerprint_runtime": {
+    "verified": true,
+    "browser": "Chrome 136.0.7103.49",
+    "user_agent": "iOS 18 CriOS 136.0.7103.49",
+    "platform": "iPhone",
+    "headless": false
+  },
+  "result": "APPROVAL_GENERIC_ERROR_WITH_TERMINAL_CHALLENGE",
+  "http_status": 200,
+  "final_path": "/checkoutweb/genericError",
+  "transport": "http/1.1",
+  "capture_integrity": "valid_3_of_3",
+  "challenge_markers": [
+    "datadome",
+    "captcha"
+  ],
+  "profile_cleanup": "closed_retained",
+  "network_environment_inspected": false,
+  "evidence": [
+    "the same old BA that produced a genericError redirect body in Round 56 reached the checkoutweb/genericError document again in a fresh SID/session",
+    "the final genericError document was additionally challenged, but it did not return to the approval-ready state",
+    "the coherent iOS runtime and capture integrity remained valid",
+    "no challenge was solved and no signup, phone, OTP, registration, funding, or authorization action occurred"
+  ],
+  "conclusion": "Two fresh-session samples now place BA hash 454fb0ad09889a8a on the genericError path. Retire it as a BA lifecycle dead end and switch the ignored local input pool to the user-provided BA hash 2a04ea05b9b222c2 without changing the fingerprint policy."
+}
