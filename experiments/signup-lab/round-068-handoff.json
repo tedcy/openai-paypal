@@ -1,0 +1,24 @@
+{
+  "round": 68,
+  "mode": "handoff",
+  "control": "locale-independent Create Account selector with fresh randomized iOS session",
+  "ba_hash": "15e96bc757b6d93f",
+  "proxy_hash": "03f0eff931fa8fb2",
+  "profile_hash": "58386a7875107fd2",
+  "profile_source": "created_randomized_ios",
+  "result": "CREATE_ACCOUNT_ACTION_RETRIED_AFTER_NAVIGATION_WAIT_TIMEOUT",
+  "browser_approval_status": 200,
+  "protocol_request_sent": false,
+  "ui_generation": "unknown",
+  "capture_integrity": "valid_549_of_549",
+  "profile_cleanup": "closed_retained_pending_exact_cleanup",
+  "network_environment_inspected": false,
+  "evidence": [
+    "approval reached /pay with HTTP 200 over HTTP/1.1 and the locale-independent selector found the intended Create Account button",
+    "the first click emitted the same hashed Server Action shape as the successful Round 66 reference and received HTTP 303",
+    "Playwright still waited for navigation, hit the five-second click timeout, and the loop retried the already-triggered action multiple times",
+    "the final screenshot showed the Create Account button in a loading spinner state",
+    "no checkoutweb/signup request was paused, no Python request was sent, and no phone, OTP, registration, funding, or authorization action occurred"
+  ],
+  "conclusion": "Click the stable Create Account button once with no_wait_after=True, record it as selected immediately, and let the existing state loop observe the app-owned transition. Do not force-click or replay the action."
+}
