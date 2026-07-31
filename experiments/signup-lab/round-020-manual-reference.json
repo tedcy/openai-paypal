@@ -13,8 +13,16 @@
     "agreements/approve and pay/checkout/signup/contact both returned HTTP 200",
     "the browser completed four Next.js Server Actions covering initial pay context, create-account selection, email continuation, and a locale change",
     "two passive hCaptcha verification requests returned HTTP 200 without a terminal challenge page",
-    "the capture contained no HTTP 4xx/5xx response and no phone, OTP, GraphQL signup, funding, or authorization submission"
+    "the capture contained no HTTP 4xx/5xx response and no phone, OTP, GraphQL signup, funding, or authorization submission",
+    "1721 of 2003 physical JSONL lines parsed independently; 282 interleaved event lines expose a concurrent-writer integrity defect, while all 349 response events and the four critical Server Action requests remained readable"
   ],
+  "capture_integrity": {
+    "physical_jsonl_lines": 2003,
+    "valid_jsonl_lines": 1721,
+    "interleaved_or_invalid_lines": 282,
+    "response_events_expected": 349,
+    "response_events_readable": 349
+  },
   "dead_ends": [],
   "next_round_focus": "Diff the captured Next.js Server Action chain against protocol Phase 0/2 and preserve the browser-bound ctxId, ADS state, cookies, action identifiers, router state, and action timing; keep legacy checkoutweb handoff gated because this BA resolved to contact-signup.",
   "capture_path": "captures/signup-lab/manual-ba-60x-cdp"
