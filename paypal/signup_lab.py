@@ -182,6 +182,19 @@ class BrowserSignupContext:
     http2_disabled_requested: bool = False
     transport_summary: dict[str, Any] = field(default_factory=dict)
     stage_timing: dict[str, Any] = field(default_factory=dict)
+    ui_generation: str = "unknown"
+
+
+def classify_signup_ui(url: str) -> str:
+    """Classify the checkout surface without interacting with signup fields."""
+    path = urllib.parse.urlsplit(url or "").path.lower().rstrip("/")
+    if path == "/checkoutweb/signup" or path.startswith("/checkoutweb/signup/"):
+        return "legacy_checkoutweb"
+    if path == "/pay/checkout/signup/contact" or path.startswith(
+        "/pay/checkout/signup/contact/"
+    ):
+        return "contact_signup"
+    return "unknown"
 
 
 class CdpCapture:
@@ -397,22 +410,17 @@ class RoxySignupLab:
             observed.append("passive_challenge_network")
         return list(dict.fromkeys(terminal)), list(dict.fromkeys(observed))
 
-    def _fill_contact_phone(self, page: Any) -> bool:
-        selectors = (
-            "input[type=tel]",
-            "input[autocomplete=tel]",
-            "input[name*=phone i]",
-            "input[id*=phone i]",
+    @staticmethod
+    def _stop_before_contact_submission(context: BrowserSignupContext) -> None:
+        context.ui_generation = "contact_signup"
+        context.stages.append(
+            {
+                "time": _utc_now(),
+                "event": "contact_signup_stopped",
+                "reason": "phone_submission_out_of_scope",
+            }
         )
-        for selector in selectors:
-            locator = page.locator(selector)
-            try:
-                if locator.count() and locator.first.is_visible():
-                    locator.first.fill(self.phone)
-                    return True
-            except Exception:
-                continue
-        return False
+        raise RuntimeError("ROXY_CONTACT_SIGNUP_STOPPED")
 
     def _drive_to_signup(self, page: Any, capture: CdpCapture, context: BrowserSignupContext) -> None:
         deadline = time.monotonic() + 150
@@ -432,6 +440,7 @@ class RoxySignupLab:
             if capture.paused_signup is not None:
                 return
             if "/checkoutweb/signup" in url:
+                context.ui_generation = "legacy_checkoutweb"
                 return
             if "/checkoutweb/genericError" in url:
                 raise RuntimeError("ROXY_APPROVAL_NAVIGATION_FAILED")
@@ -449,6 +458,7 @@ class RoxySignupLab:
                 context.challenge_markers = list(dict.fromkeys(observed + markers))
                 raise RuntimeError("ROXY_SIGNUP_CHALLENGED")
             stage = self._page_stage(url)
+            context.ui_generation = classify_signup_ui(url)
             stage_entered_at.setdefault(stage, time.monotonic())
             if stage not in captured_stages:
                 self._capture_controls(page, context, stage)
@@ -497,13 +507,8 @@ class RoxySignupLab:
                 if pay_create_account_selected and time.monotonic() - stage_entered_at[stage] > 20.0:
                     self._capture_controls(page, context, "pay_email_form_missing")
                     raise RuntimeError("ROXY_CREATE_ACCOUNT_CONTROL_MISSING")
-            elif stage == "contact" and "contact_continue" not in completed_actions:
-                phone_filled = self._fill_contact_phone(page)
-                context.stages.append({"time": _utc_now(), "event": "contact_phone", "filled": phone_filled})
-                if phone_filled and self._click_first(page, (r"continue", r"next")):
-                    completed_actions.add("contact_continue")
-                    context.stages.append({"time": _utc_now(), "event": "contact_continue"})
-                    continue
+            elif stage == "contact":
+                self._stop_before_contact_submission(context)
         raise RuntimeError("ROXY_SIGNUP_REDIRECT_TIMEOUT")
 
     def _capture_failure_page(self, page: Any, context: BrowserSignupContext) -> None:
@@ -713,6 +718,7 @@ class RoxySignupLab:
             "ba_hash": _hash(self.ba_token),
             "proxy_hash": _hash(self.proxy_entry.url),
             "country": self.country_profile.country,
+            "ui_generation": context_result.ui_generation,
             "http_status": context_result.http_status,
             "classification": context_result.classification,
             "browser_transport": {

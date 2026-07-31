@@ -4,7 +4,14 @@ from pathlib import Path
 import pytest
 import httpx
 
-from paypal.signup_lab import CdpCapture, RoxySignupLab, SignupLabInputs, classify_signup_document
+from paypal.signup_lab import (
+    BrowserSignupContext,
+    CdpCapture,
+    RoxySignupLab,
+    SignupLabInputs,
+    classify_signup_document,
+    classify_signup_ui,
+)
 from paypal.traffic_recorder import TrafficRecorder
 from tools.compare_paypal_traffic import compare
 
@@ -41,6 +48,56 @@ def test_signup_lab_inputs_accept_utf8_bom(tmp_path) -> None:
     )
 
     assert SignupLabInputs.load(source).selection()[0] == "BA-12345678ABCDEF"
+
+
+def test_signup_lab_inputs_route_bosnia_phone_and_proxy(tmp_path) -> None:
+    source = tmp_path / "inputs-ba.json"
+    source.write_text(
+        json.dumps(
+            {
+                "ba_tokens": ["BA-12345678ABCDEF"],
+                "phone": "+387644518746",
+                "proxies": ["proxy.test:3010:ba-user:ba-password"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    inputs = SignupLabInputs.load(source)
+    lab = RoxySignupLab(
+        mode="reference",
+        ba_token=inputs.selection()[0],
+        phone=inputs.phone,
+        proxy_line=inputs.selection()[1],
+        capture_root=tmp_path / "capture",
+    )
+
+    assert lab.country_profile.country == "BA"
+    assert lab.country_profile.language == "en-BA"
+    assert lab.country_profile.timezone == "Europe/Sarajevo"
+    assert lab.proxy_entry.username == "ba-user"
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("https://www.paypal.com/checkoutweb/signup?token=EC-X", "legacy_checkoutweb"),
+        ("https://www.paypal.com/pay/checkout/signup/contact", "contact_signup"),
+        ("https://www.paypal.com/pay", "unknown"),
+    ],
+)
+def test_signup_ui_generation(url: str, expected: str) -> None:
+    assert classify_signup_ui(url) == expected
+
+
+def test_contact_signup_stops_before_phone_submission() -> None:
+    context = BrowserSignupContext()
+
+    with pytest.raises(RuntimeError, match="ROXY_CONTACT_SIGNUP_STOPPED"):
+        RoxySignupLab._stop_before_contact_submission(context)
+
+    assert context.ui_generation == "contact_signup"
+    assert context.stages[-1]["reason"] == "phone_submission_out_of_scope"
 
 
 def test_signup_document_requires_healthy_signup_html() -> None:
