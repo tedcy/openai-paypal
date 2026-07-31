@@ -1,0 +1,25 @@
+{
+  "round": 47,
+  "mode": "reference",
+  "control": "strict no-CDP explicit address-bar navigation from a workbench-only Profile",
+  "ba_hash": "454fb0ad09889a8a",
+  "proxy_hash": "5824b583c526e177",
+  "identity_refresh": "new device name and MAC submitted before open",
+  "identity_hashes": "not_retained_after_local_open_timeout",
+  "cache_clear": "roxy_native_all",
+  "cdp_connected": false,
+  "open_payload_overrides": "none",
+  "navigation_source": "visible_address_bar",
+  "result": "approval_pay_login_ready",
+  "status": "not_observed_without_cdp",
+  "page_title": "Pay with PayPal",
+  "profile_cleanup": "left_open_not_deleted",
+  "evidence": [
+    "the previously restored PayPal tab was closed before the Profile restart",
+    "Roxy was closed, cleared with clear_local_cache type=all, assigned a fresh SID, device name, and MAC, then opened without CDP",
+    "the Local API open response exceeded its client wait, but the exact test Profile opened successfully and remained controllable",
+    "the BA URL was entered explicitly through the visible address bar",
+    "the resulting page displayed the email field, Next control, and Create an Account control with no terminal challenge page"
+  ],
+  "conclusion": "First strict explicit-navigation reproduction succeeded without CDP. Two additional independent fresh-identity repetitions are required before calling the procedure stable."
+}
