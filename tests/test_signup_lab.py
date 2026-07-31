@@ -14,6 +14,7 @@ from paypal.signup_lab import (
     RoxyApprovalControl,
     RoxySignupLab,
     SignupLabInputs,
+    _SIGNUP_LAB_NAVIGATION_TIMEOUT_SECONDS,
     _approval_document_has_status,
     _configure_roxy_for_randomized_ios,
     _configure_roxy_for_signup_lab,
@@ -276,6 +277,12 @@ def test_handoff_defaults_to_thirty_second_headed_window_hold(tmp_path) -> None:
     )
 
     assert lab.window_hold_seconds == 30.0
+
+
+def test_signup_navigation_budget_covers_slow_ctf_page_transitions() -> None:
+    assert _SIGNUP_LAB_NAVIGATION_TIMEOUT_SECONDS == 300.0
+    source = inspect.getsource(RoxySignupLab._drive_to_signup)
+    assert "_SIGNUP_LAB_NAVIGATION_TIMEOUT_SECONDS" in source
 
 
 def test_manual_navigation_requires_explicit_existing_profile(tmp_path) -> None:

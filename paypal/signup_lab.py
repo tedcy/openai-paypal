@@ -51,6 +51,7 @@ _INVALID_BA_MARKERS = (
     "expired ba token",
 )
 _SIGNUP_LAB_ROXY_API_TIMEOUT_SECONDS = 60.0
+_SIGNUP_LAB_NAVIGATION_TIMEOUT_SECONDS = 300.0
 _SIGNUP_LAB_INPUT_LOCK = threading.Lock()
 _EXISTING_PROFILE_CLEAR_ORIGINS = (
     "https://www.paypal.com",
@@ -824,7 +825,7 @@ class RoxySignupLab:
         raise RuntimeError("ROXY_CONTACT_SIGNUP_STOPPED")
 
     def _drive_to_signup(self, page: Any, capture: CdpCapture, context: BrowserSignupContext) -> None:
-        deadline = time.monotonic() + 150
+        deadline = time.monotonic() + _SIGNUP_LAB_NAVIGATION_TIMEOUT_SECONDS
         last_url = ""
         captured_stages: set[str] = set()
         completed_actions: set[str] = set()
