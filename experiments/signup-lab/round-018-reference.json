@@ -1,0 +1,20 @@
+{
+  "round": 18,
+  "mode": "reference",
+  "status": "ROXY_COUNTRY_OPTION_MISSING",
+  "ba_hash": "20b1939e7a12c001",
+  "proxy_hash": "1ca1868089ae2dba",
+  "country": "BA",
+  "ui_generation": "unknown",
+  "last_stage": "pay_country_option",
+  "evidence": [
+    "the combobox-role Country select control was found and clicked",
+    "no Bosnia and Herzegovina or +387 option became visible within the current 350ms settle window",
+    "the failure DOM contained no rendered country options and the screenshot showed the selector closed",
+    "the request/response delta was still 31, consistent with an incompletely settled pay application",
+    "no country option, phone number, SMS, registration, funding, or authorization action occurred"
+  ],
+  "dead_ends": [],
+  "next_round_focus": "poll for the expected country option for a bounded 10-second hydration window after the single combobox click",
+  "capture_path": "captures/signup-lab/round-018-ba-country-reference"
+}
