@@ -595,6 +595,19 @@ def test_roxy_window_hold_does_not_mask_original_failure() -> None:
     assert context.stages[-1]["completed"] is False
 
 
+def test_runtime_gate_failure_holds_window_before_raising() -> None:
+    calls = []
+    lab = object.__new__(RoxySignupLab)
+    lab._hold_window = lambda page, context, reason: calls.append((page, reason))
+    page = object()
+    context = BrowserSignupContext(runtime_fingerprint={"verified": False})
+
+    with pytest.raises(RuntimeError, match="ROXY_RUNTIME_FINGERPRINT_MISMATCH"):
+        lab._require_runtime_identity(page, context)
+
+    assert calls == [(page, "runtime_gate_failure")]
+
+
 def test_passive_challenge_signals_are_observed_but_not_terminal() -> None:
     lab = object.__new__(RoxySignupLab)
     page = type("Page", (), {

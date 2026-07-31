@@ -818,6 +818,16 @@ class RoxySignupLab:
             _hash(context.profile_id),
         )
 
+    def _require_runtime_identity(
+        self,
+        page: Any,
+        context: BrowserSignupContext,
+    ) -> None:
+        if context.runtime_fingerprint.get("verified"):
+            return
+        self._hold_window(page, context, reason="runtime_gate_failure")
+        raise RuntimeError("ROXY_RUNTIME_FINGERPRINT_MISMATCH")
+
     @staticmethod
     def _extract_context(url: str, html: str) -> tuple[str, str, str]:
         material = f"{url}\n{html}"
@@ -954,8 +964,7 @@ class RoxySignupLab:
                     self.capture_root / "browser" / "runtime_fingerprint.json",
                     context_result.runtime_fingerprint,
                 )
-                if not context_result.runtime_fingerprint.get("verified"):
-                    raise RuntimeError("ROXY_RUNTIME_FINGERPRINT_MISMATCH")
+                self._require_runtime_identity(page, context_result)
                 approval_url = f"https://www.paypal.com/agreements/approve?ba_token={self.ba_token}"
                 context_result.stages.append({"time": _utc_now(), "event": "approval_start"})
                 try:
