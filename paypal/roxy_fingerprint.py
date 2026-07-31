@@ -371,7 +371,13 @@ class RoxyCaptureConfig:
     language: str = "en-US"
     display_language: str = "en-US"
     timezone: str = "UTC"
-    follow_ip: bool = False
+    follow_ip: bool = True
+    geolocation_mode: int = 1
+    resolution_type: bool = False
+    font_type: bool = False
+    do_not_track: bool = True
+    hardware_concurrency: int = 12
+    device_memory: int = 8
     core_type: str = "Chrome"
     core_version: str = "136"
     os_name: str = "macOS"
@@ -384,7 +390,7 @@ class RoxyCaptureConfig:
 class RoxyFingerprintPolicy:
     """Identity fields shared by every Roxy-backed flow."""
 
-    name: str = "legacy-macos15-chrome136"
+    name: str = "manual-test-macos15-chrome136"
     core_type: str = "Chrome"
     core_version: str = "136"
     os_name: str = "macOS"
@@ -393,6 +399,13 @@ class RoxyFingerprintPolicy:
     headless: bool = False
     open_width: int = 1000
     open_height: int = 1000
+    follow_ip: bool = True
+    geolocation_mode: int = 1
+    resolution_type: bool = False
+    font_type: bool = False
+    do_not_track: bool = True
+    hardware_concurrency: int = 12
+    device_memory: int = 8
 
 
 ROXY_FINGERPRINT_POLICY = RoxyFingerprintPolicy()
@@ -422,7 +435,7 @@ def _roxy_finger_info_template(
         "displayLanguage": config.display_language,
         "isTimeZone": config.follow_ip,
         "timeZone": config.timezone,
-        "position": 0,
+        "position": config.geolocation_mode,
         "isPositionBaseIp": config.follow_ip,
         "forbidAudio": False,
         "forbidImage": False,
@@ -449,10 +462,10 @@ def _roxy_finger_info_template(
         "stopOpenIP": False,
         "stopOpenPosition": False,
         "openWorkbench": 0,
-        "resolutionType": True,
-        "resolutionX": str(config.screen_width),
-        "resolutionY": str(config.screen_height),
-        "fontType": True,
+        "resolutionType": config.resolution_type,
+        "resolutionX": str(config.screen_width) if config.resolution_type else "",
+        "resolutionY": str(config.screen_height) if config.resolution_type else "",
+        "fontType": config.font_type,
         "webRTC": config.web_rtc_mode,
         "webGL": True,
         "webGLInfo": True,
@@ -462,13 +475,13 @@ def _roxy_finger_info_template(
         "canvas": True,
         "audioContext": True,
         "speechVoices": True,
-        "doNotTrack": False,
+        "doNotTrack": config.do_not_track,
         "clientRects": True,
         "deviceInfo": True,
         "deviceNameSwitch": True,
         "macInfo": True,
-        "hardwareConcurrent": "",
-        "deviceMemory": "",
+        "hardwareConcurrent": str(config.hardware_concurrency),
+        "deviceMemory": str(config.device_memory),
         "disableSsl": False,
         "disableSslList": [],
         "portScanProtect": True,
@@ -501,11 +514,21 @@ def _profile_policy_verification(
         "os_version": str(detail.get("osVersion") or detail.get("os_version") or ""),
         "web_rtc_mode": finger_info.get("webRTC"),
         "random_fingerprint": finger_info.get("randomFingerprint"),
+        "language_base_ip": finger_info.get("isLanguageBaseIp"),
+        "display_language_base_ip": finger_info.get("isDisplayLanguageBaseIp"),
+        "timezone_base_ip": finger_info.get("isTimeZone"),
+        "geolocation_mode": finger_info.get("position"),
+        "geolocation_base_ip": finger_info.get("isPositionBaseIp"),
         "language": str(finger_info.get("language") or ""),
         "display_language": str(finger_info.get("displayLanguage") or ""),
         "timezone": str(finger_info.get("timeZone") or ""),
         "open_width": str(finger_info.get("openWidth") or ""),
         "open_height": str(finger_info.get("openHeight") or ""),
+        "resolution_type": finger_info.get("resolutionType"),
+        "font_type": finger_info.get("fontType"),
+        "do_not_track": finger_info.get("doNotTrack"),
+        "hardware_concurrency": str(finger_info.get("hardwareConcurrent") or ""),
+        "device_memory": str(finger_info.get("deviceMemory") or ""),
         "user_agent": str(detail.get("userAgent") or detail.get("user_agent") or ""),
     }
     expected = {
@@ -515,11 +538,21 @@ def _profile_policy_verification(
         "os_version": config.os_version,
         "web_rtc_mode": config.web_rtc_mode,
         "random_fingerprint": False,
+        "language_base_ip": config.follow_ip,
+        "display_language_base_ip": config.follow_ip,
+        "timezone_base_ip": config.follow_ip,
+        "geolocation_mode": config.geolocation_mode,
+        "geolocation_base_ip": config.follow_ip,
         "language": config.language,
         "display_language": config.display_language,
         "timezone": config.timezone,
         "open_width": str(config.open_width),
         "open_height": str(config.open_height),
+        "resolution_type": config.resolution_type,
+        "font_type": config.font_type,
+        "do_not_track": config.do_not_track,
+        "hardware_concurrency": str(config.hardware_concurrency),
+        "device_memory": str(config.device_memory),
         "user_agent_major": config.core_version,
     }
     mismatches: list[str] = []
@@ -545,11 +578,21 @@ def _profile_policy_verification(
     for key in (
         "web_rtc_mode",
         "random_fingerprint",
+        "language_base_ip",
+        "display_language_base_ip",
+        "timezone_base_ip",
+        "geolocation_mode",
+        "geolocation_base_ip",
         "language",
         "display_language",
         "timezone",
         "open_width",
         "open_height",
+        "resolution_type",
+        "font_type",
+        "do_not_track",
+        "hardware_concurrency",
+        "device_memory",
     ):
         if observed[key] is None or observed[key] == "":
             unobservable.append(key)
@@ -586,25 +629,49 @@ def inspect_roxy_runtime_identity(cdp: Any, page: Any, config: RoxyCaptureConfig
     browser_version = dict(cdp.send("Browser.getVersion") or {})
     runtime = dict(
         page.evaluate(
-            """() => ({
-                userAgent: navigator.userAgent,
-                platform: navigator.platform,
-                language: navigator.language,
-                languages: Array.from(navigator.languages || []),
-                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-                screen: {
-                    width: screen.width,
-                    height: screen.height,
-                    availWidth: screen.availWidth,
-                    availHeight: screen.availHeight
-                },
-                window: {
-                    innerWidth: window.innerWidth,
-                    innerHeight: window.innerHeight,
-                    outerWidth: window.outerWidth,
-                    outerHeight: window.outerHeight
+            """async () => {
+                let geolocationPermission = "unsupported";
+                try {
+                    if (navigator.permissions && navigator.permissions.query) {
+                        const result = await navigator.permissions.query({name: "geolocation"});
+                        geolocationPermission = String(result && result.state || "unknown");
+                    }
+                } catch (error) {
+                    geolocationPermission = `error:${error && error.name || "unknown"}`;
                 }
-            })"""
+                const fontChecks = {};
+                for (const name of ["Arial", "Helvetica Neue", "SF Pro Text", "Segoe UI"]) {
+                    try {
+                        fontChecks[name] = Boolean(document.fonts && document.fonts.check(`12px "${name}"`));
+                    } catch (error) {
+                        fontChecks[name] = null;
+                    }
+                }
+                return {
+                    userAgent: navigator.userAgent,
+                    platform: navigator.platform,
+                    language: navigator.language,
+                    languages: Array.from(navigator.languages || []),
+                    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                    hardwareConcurrency: navigator.hardwareConcurrency,
+                    deviceMemory: navigator.deviceMemory,
+                    doNotTrack: navigator.doNotTrack,
+                    geolocationPermission,
+                    fontChecks,
+                    screen: {
+                        width: screen.width,
+                        height: screen.height,
+                        availWidth: screen.availWidth,
+                        availHeight: screen.availHeight
+                    },
+                    window: {
+                        innerWidth: window.innerWidth,
+                        innerHeight: window.innerHeight,
+                        outerWidth: window.outerWidth,
+                        outerHeight: window.outerHeight
+                    }
+                };
+            }"""
         )
         or {}
     )
@@ -621,6 +688,11 @@ def inspect_roxy_runtime_identity(cdp: Any, page: Any, config: RoxyCaptureConfig
         "language": str(runtime.get("language") or ""),
         "languages": list(runtime.get("languages") or []),
         "timezone": str(runtime.get("timezone") or ""),
+        "hardware_concurrency": int(runtime.get("hardwareConcurrency") or 0),
+        "device_memory": int(float(runtime.get("deviceMemory") or 0)),
+        "do_not_track": str(runtime.get("doNotTrack") or ""),
+        "geolocation_permission": str(runtime.get("geolocationPermission") or ""),
+        "font_checks": _dict_value(runtime.get("fontChecks")),
         "outer_width": int(window.get("outerWidth") or 0),
         "outer_height": int(window.get("outerHeight") or 0),
         "headless_ua": "HeadlessChrome/" in user_agent,
@@ -637,10 +709,32 @@ def inspect_roxy_runtime_identity(cdp: Any, page: Any, config: RoxyCaptureConfig
         mismatches.append("user_agent_os")
     if "mac" not in platform.lower():
         mismatches.append("platform")
-    if observed["language"] != config.language:
-        mismatches.append("language")
-    if observed["timezone"] != _runtime_timezone_name(config.timezone):
-        mismatches.append("timezone")
+    if config.follow_ip:
+        if not observed["language"]:
+            mismatches.append("language")
+        if not observed["timezone"]:
+            mismatches.append("timezone")
+    else:
+        if observed["language"] != config.language:
+            mismatches.append("language")
+        if observed["timezone"] != _runtime_timezone_name(config.timezone):
+            mismatches.append("timezone")
+    if observed["hardware_concurrency"] != config.hardware_concurrency:
+        mismatches.append("hardware_concurrency")
+    if observed["device_memory"] != config.device_memory:
+        mismatches.append("device_memory")
+    if config.do_not_track and observed["do_not_track"] != "1":
+        mismatches.append("do_not_track")
+    expected_geolocation_permission = {
+        0: "prompt",
+        1: "granted",
+        2: "denied",
+    }.get(config.geolocation_mode, "")
+    if (
+        expected_geolocation_permission
+        and observed["geolocation_permission"] != expected_geolocation_permission
+    ):
+        mismatches.append("geolocation_permission")
     outer_width_frame_delta = bool(
         not config.headless
         and observed["outer_width"] > 0
@@ -725,7 +819,13 @@ def load_roxy_capture_config(
         language=_env_str("PAYPAL_ROXY_LANGUAGE", language),
         display_language=_env_str("PAYPAL_ROXY_DISPLAY_LANGUAGE", language),
         timezone=_env_str("PAYPAL_ROXY_TIMEZONE", timezone),
-        follow_ip=_env_bool("PAYPAL_ROXY_FOLLOW_IP", False),
+        follow_ip=_env_bool("PAYPAL_ROXY_FOLLOW_IP", policy.follow_ip),
+        geolocation_mode=policy.geolocation_mode,
+        resolution_type=policy.resolution_type,
+        font_type=policy.font_type,
+        do_not_track=policy.do_not_track,
+        hardware_concurrency=policy.hardware_concurrency,
+        device_memory=policy.device_memory,
         core_type=policy.core_type,
         core_version=policy.core_version,
         os_name=policy.os_name,
@@ -944,7 +1044,9 @@ class RoxyApiClient:
             payload["projectId"] = project_id
         logger.info(
             "Creating Roxy profile policy={} core={}/{} os={}/{} webRTC={} headed={} "
-            "window={}x{} workspace_id={} project_id={} proxy_enabled={} category={} startup_args={}",
+            "window={}x{} follow_ip={} geolocation_mode={} resolution_source={} "
+            "font_source={} dnt={} hardware_threads={} device_memory_gb={} "
+            "workspace_id={} project_id={} proxy_enabled={} category={} startup_args={}",
             ROXY_FINGERPRINT_POLICY.name,
             self.config.core_type,
             self.config.core_version,
@@ -954,6 +1056,13 @@ class RoxyApiClient:
             not self.config.headless,
             self.config.open_width,
             self.config.open_height,
+            self.config.follow_ip,
+            self.config.geolocation_mode,
+            "custom" if self.config.resolution_type else "system",
+            "custom" if self.config.font_type else "system",
+            self.config.do_not_track,
+            self.config.hardware_concurrency,
+            self.config.device_memory,
             workspace_id,
             project_id,
             bool(_canonical_proxy_url(self.config.proxy_url)),
@@ -1042,12 +1151,22 @@ class RoxyApiClient:
                 "displayLanguage": self.config.display_language,
                 "isTimeZone": self.config.follow_ip,
                 "timeZone": self.config.timezone,
+                "position": self.config.geolocation_mode,
+                "isPositionBaseIp": self.config.follow_ip,
                 "openWidth": str(self.config.open_width),
                 "openHeight": str(self.config.open_height),
-                "resolutionType": True,
-                "resolutionX": str(self.config.screen_width),
-                "resolutionY": str(self.config.screen_height),
+                "resolutionType": self.config.resolution_type,
+                "resolutionX": (
+                    str(self.config.screen_width) if self.config.resolution_type else ""
+                ),
+                "resolutionY": (
+                    str(self.config.screen_height) if self.config.resolution_type else ""
+                ),
+                "fontType": self.config.font_type,
                 "webRTC": self.config.web_rtc_mode,
+                "doNotTrack": self.config.do_not_track,
+                "hardwareConcurrent": str(self.config.hardware_concurrency),
+                "deviceMemory": str(self.config.device_memory),
                 "randomFingerprint": False,
                 "syncTab": False,
                 "syncCookie": False,

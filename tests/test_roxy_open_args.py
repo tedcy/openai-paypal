@@ -11,6 +11,21 @@ from paypal.roxy_fingerprint import (
 )
 
 
+def _aligned_runtime_fields() -> dict:
+    return {
+        "hardwareConcurrency": 12,
+        "deviceMemory": 8,
+        "doNotTrack": "1",
+        "geolocationPermission": "granted",
+        "fontChecks": {
+            "Arial": True,
+            "Helvetica Neue": True,
+            "SF Pro Text": False,
+            "Segoe UI": True,
+        },
+    }
+
+
 def test_proxied_roxy_open_disables_http2_once() -> None:
     assert _roxy_open_args("http://user:password@proxy.test:3010") == [
         "--remote-allow-origins=*",
@@ -45,7 +60,14 @@ def test_global_roxy_policy_ignores_legacy_fingerprint_overrides(monkeypatch) ->
     assert config.os_version == "15"
     assert config.web_rtc_mode == 0
     assert (config.open_width, config.open_height) == (1000, 1000)
-    assert ROXY_FINGERPRINT_POLICY.name == "legacy-macos15-chrome136"
+    assert config.follow_ip is True
+    assert config.geolocation_mode == 1
+    assert config.resolution_type is False
+    assert config.font_type is False
+    assert config.do_not_track is True
+    assert config.hardware_concurrency == 12
+    assert config.device_memory == 8
+    assert ROXY_FINGERPRINT_POLICY.name == "manual-test-macos15-chrome136"
 
 
 def test_proxied_profile_persists_open_args_before_first_launch() -> None:
@@ -82,6 +104,18 @@ def test_proxied_profile_persists_open_args_before_first_launch() -> None:
     assert payload["fingerInfo"]["webGLRender"] == ""
     assert payload["fingerInfo"]["openWidth"] == "1000"
     assert payload["fingerInfo"]["openHeight"] == "1000"
+    assert payload["fingerInfo"]["isLanguageBaseIp"] is True
+    assert payload["fingerInfo"]["isDisplayLanguageBaseIp"] is True
+    assert payload["fingerInfo"]["isTimeZone"] is True
+    assert payload["fingerInfo"]["position"] == 1
+    assert payload["fingerInfo"]["isPositionBaseIp"] is True
+    assert payload["fingerInfo"]["resolutionType"] is False
+    assert payload["fingerInfo"]["resolutionX"] == ""
+    assert payload["fingerInfo"]["resolutionY"] == ""
+    assert payload["fingerInfo"]["fontType"] is False
+    assert payload["fingerInfo"]["doNotTrack"] is True
+    assert payload["fingerInfo"]["hardwareConcurrent"] == "12"
+    assert payload["fingerInfo"]["deviceMemory"] == "8"
 
 
 def test_open_profile_sends_disable_http2_for_proxy() -> None:
@@ -182,6 +216,18 @@ def test_randomize_and_freeze_preserves_roxy_noise_and_reapplies_policy() -> Non
     assert modified["fingerInfo"]["audioContext"] == {"noise": "roxy-generated"}
     assert modified["fingerInfo"]["webGLManufacturer"] == "Google Inc. (Intel Inc.)"
     assert "Apple M3" not in modified["fingerInfo"]["webGLRender"]
+    assert modified["fingerInfo"]["isLanguageBaseIp"] is True
+    assert modified["fingerInfo"]["isDisplayLanguageBaseIp"] is True
+    assert modified["fingerInfo"]["isTimeZone"] is True
+    assert modified["fingerInfo"]["position"] == 1
+    assert modified["fingerInfo"]["isPositionBaseIp"] is True
+    assert modified["fingerInfo"]["resolutionType"] is False
+    assert modified["fingerInfo"]["resolutionX"] == ""
+    assert modified["fingerInfo"]["resolutionY"] == ""
+    assert modified["fingerInfo"]["fontType"] is False
+    assert modified["fingerInfo"]["doNotTrack"] is True
+    assert modified["fingerInfo"]["hardwareConcurrent"] == "12"
+    assert modified["fingerInfo"]["deviceMemory"] == "8"
 
 
 def test_roxy_v4_summary_detail_uses_visible_and_acknowledged_policy_evidence() -> None:
@@ -244,8 +290,8 @@ def test_roxy_v4_summary_detail_uses_visible_and_acknowledged_policy_evidence() 
     assert modified["fingerInfo"]["webGL"] is True
     assert modified["fingerInfo"]["webGLManufacturer"] == ""
     assert modified["fingerInfo"]["webGLRender"] == ""
-    assert modified["fingerInfo"]["hardwareConcurrent"] == ""
-    assert modified["fingerInfo"]["deviceMemory"] == ""
+    assert modified["fingerInfo"]["hardwareConcurrent"] == "12"
+    assert modified["fingerInfo"]["deviceMemory"] == "8"
 
 
 def test_roxy_v4_summary_omits_empty_user_agent_until_runtime_verification() -> None:
@@ -309,6 +355,7 @@ def test_runtime_identity_verification_uses_cdp_without_webrtc_probe() -> None:
             assert "RTCPeerConnection" not in script
             assert "candidate" not in script.lower()
             return {
+                **_aligned_runtime_fields(),
                 "userAgent": (
                     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
                     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -351,6 +398,7 @@ def test_runtime_identity_accepts_outer_height_clamped_to_physical_screen() -> N
     class Page:
         def evaluate(self, script):
             return {
+                **_aligned_runtime_fields(),
                 "userAgent": (
                     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
                     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -398,6 +446,7 @@ def test_runtime_identity_accepts_two_pixel_headed_window_frame_delta() -> None:
     class Page:
         def evaluate(self, script):
             return {
+                **_aligned_runtime_fields(),
                 "userAgent": (
                     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
                     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -437,6 +486,7 @@ def test_runtime_identity_rejects_windows_ua_for_macos_policy() -> None:
     class Page:
         def evaluate(self, script):
             return {
+                **_aligned_runtime_fields(),
                 "userAgent": (
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -472,6 +522,7 @@ def test_runtime_identity_rejects_unexplained_outer_height_mismatch() -> None:
     class Page:
         def evaluate(self, script):
             return {
+                **_aligned_runtime_fields(),
                 "userAgent": (
                     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
                     "AppleWebKit/537.36 (KHTML, like Gecko) "
