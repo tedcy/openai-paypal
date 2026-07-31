@@ -1,0 +1,26 @@
+{
+  "round": 54,
+  "mode": "approval-control",
+  "control": "existing test Profile with coherent iOS CriOS UA and a fresh SID",
+  "ba_hash": "454fb0ad09889a8a",
+  "proxy_hash": "767d8dc4f69e24c3",
+  "profile_hash": "ee3917e3ec1305dc",
+  "proxy_cursor": {
+    "selected": 22,
+    "next": 23,
+    "quarantined": false
+  },
+  "result": "ROXY_RANDOMIZE_SEQUENCE_API_FAILURE",
+  "failure_stage": "profile_randomize_and_freeze",
+  "http_status": 0,
+  "target_document_requests": 0,
+  "profile_cleanup": "closed_retained",
+  "network_environment_inspected": false,
+  "evidence": [
+    "the exact test Profile detail check and cache-clear boundary completed, then a Roxy Local API business error stopped the randomize/detail/mdf sequence",
+    "no browser/CDP runtime was opened and no approval request or CTF response existed",
+    "the SID was not quarantined because the target was never contacted",
+    "the reference Roxy client documents explicit request-frequency failures on detail, random_env, mdf, close and other non-create management calls"
+  ],
+  "conclusion": "Add process-wide serialization, a short minimum interval, and bounded retries only for explicit Roxy Local API rate-limit responses. Do not change the fingerprint, SID rule, or target navigation."
+}
