@@ -408,6 +408,13 @@ class BrowserSignupContext:
     window_hold_seconds: float = 0.0
     window_hold_completed: bool = False
     manual_navigation: bool = False
+    signup_request_paused: bool = False
+    pause_to_protocol_ms: int = 0
+    protocol_request_started: bool = False
+    protocol_request_completed: bool = False
+    protocol_response_status: int = 0
+    paused_request_resolution: str = ""
+    handoff_error_stage: str = ""
 
 
 def classify_signup_ui(url: str) -> str:
@@ -475,6 +482,8 @@ class CdpCapture:
         self.bodies_dir = root / "network" / "bodies"
         self.pause_signup = pause_signup
         self.paused_signup: dict[str, Any] | None = None
+        self.paused_signup_monotonic: float | None = None
+        self.paused_signup_resolution = ""
         self.requests: dict[str, dict[str, Any]] = {}
         self.extra_headers: dict[str, dict[str, Any]] = {}
         self.responses: dict[str, dict[str, Any]] = {}
@@ -581,17 +590,31 @@ class CdpCapture:
         request = event.get("request") or {}
         if "/checkoutweb/signup" in str(request.get("url") or "") and self.paused_signup is None:
             self.paused_signup = event
+            self.paused_signup_monotonic = time.monotonic()
             self._record("signupRequestPaused", event)
             return
         self.cdp.send("Fetch.continueRequest", {"requestId": event["requestId"]})
 
-    def fail_paused_signup(self) -> None:
+    def pause_elapsed_ms(self) -> int:
+        if self.paused_signup_monotonic is None:
+            return 0
+        return max(0, int((time.monotonic() - self.paused_signup_monotonic) * 1000))
+
+    def fail_paused_signup(self) -> str:
+        if self.paused_signup_resolution:
+            return self.paused_signup_resolution
         if not self.paused_signup:
-            return
+            return "not_paused"
         try:
             self.cdp.send("Fetch.failRequest", {"requestId": self.paused_signup["requestId"], "errorReason": "Aborted"})
-        except Exception:
-            pass
+            self.paused_signup_resolution = "failed_aborted"
+        except Exception as exc:
+            self.paused_signup_resolution = f"resolution_failed:{type(exc).__name__}"
+        self._record(
+            "signupRequestResolved",
+            {"resolution": self.paused_signup_resolution},
+        )
+        return self.paused_signup_resolution
 
     def close(self) -> dict[str, Any]:
         if not self.capture_integrity:
@@ -635,7 +658,10 @@ class RoxySignupLab:
         self.capture_root = Path(capture_root).expanduser().resolve()
         self.protocol_transport = protocol_transport
         self.keep_profile = keep_profile
-        self.window_hold_seconds = max(0.0, min(float(window_hold_seconds), 3600.0))
+        requested_hold = max(0.0, min(float(window_hold_seconds), 3600.0))
+        self.window_hold_seconds = (
+            30.0 if mode == "handoff" and requested_hold == 0.0 else requested_hold
+        )
         self.warmup = bool(warmup)
         self.existing_profile_id = str(existing_profile_id or "").strip()
         self.existing_profile_name = str(existing_profile_name or "").strip()
@@ -1056,12 +1082,25 @@ class RoxySignupLab:
             (query.get("ctxId") or [""])[0],
         )
 
-    def _protocol_handoff(self, paused: dict[str, Any], cookies: list[dict[str, Any]], output: Path) -> dict[str, Any]:
+    @staticmethod
+    def _handoff_headers(
+        paused: Mapping[str, Any],
+        cookies: list[dict[str, Any]],
+    ) -> dict[str, str]:
         request = dict(paused.get("request") or {})
-        url = str(request.get("url") or "")
-        headers = {str(k): str(v) for k, v in dict(request.get("headers") or {}).items()}
-        headers.pop("Host", None)
-        headers.pop("host", None)
+        headers = {
+            str(key): str(value)
+            for key, value in dict(request.get("headers") or {}).items()
+        }
+        for key in tuple(headers):
+            if key.lower() == "host":
+                headers.pop(key, None)
+        captured_cookie_key = next(
+            (key for key in headers if key.lower() == "cookie"),
+            "",
+        )
+        if captured_cookie_key:
+            return headers
         cookie_header = "; ".join(
             f"{item.get('name')}={item.get('value')}"
             for item in cookies
@@ -1069,6 +1108,12 @@ class RoxySignupLab:
         )
         if cookie_header:
             headers["Cookie"] = cookie_header
+        return headers
+
+    def _protocol_handoff(self, paused: dict[str, Any], cookies: list[dict[str, Any]], output: Path) -> dict[str, Any]:
+        request = dict(paused.get("request") or {})
+        url = str(request.get("url") or "")
+        headers = self._handoff_headers(paused, cookies)
         output.mkdir(parents=True, exist_ok=True)
         _write_json(output / "request.json", {"method": "GET", "url": url, "headers": headers})
         if self.protocol_transport in {"curl-chrome", "curl-chrome-http1"}:
@@ -1115,6 +1160,80 @@ class RoxySignupLab:
         }
         _write_json(output / "result.json", result)
         return result
+
+    def _execute_paused_handoff(
+        self,
+        capture: CdpCapture,
+        cookies: list[dict[str, Any]],
+        context: BrowserSignupContext,
+    ) -> dict[str, Any]:
+        if not capture.paused_signup:
+            raise RuntimeError("ROXY_SIGNUP_REQUEST_NOT_PAUSED")
+        paused_request = dict(capture.paused_signup.get("request") or {})
+        context.signup_request_paused = True
+        context.final_url = str(paused_request.get("url") or "")
+        context.request_headers = {
+            str(key): str(value)
+            for key, value in dict(paused_request.get("headers") or {}).items()
+        }
+        context.ec_token, context.ssrt, context.ctx_id = self._extract_context(
+            context.final_url,
+            "",
+        )
+        context.pause_to_protocol_ms = capture.pause_elapsed_ms()
+        context.protocol_request_started = True
+        context.stages.append(
+            {
+                "time": _utc_now(),
+                "event": "protocol_handoff_start",
+                "pause_to_protocol_ms": context.pause_to_protocol_ms,
+            }
+        )
+        try:
+            protocol = self._protocol_handoff(
+                capture.paused_signup,
+                cookies,
+                self.capture_root / "protocol",
+            )
+            context.protocol_request_completed = True
+            context.protocol_response_status = int(protocol.get("status") or 0)
+            context.http_status = context.protocol_response_status
+            context.content_type = str(
+                (protocol.get("classification") or {}).get("content_type") or ""
+            )
+            context.classification = dict(protocol.get("classification") or {})
+            context.status = (
+                "protocol_signup_ready"
+                if context.classification.get("valid")
+                else "signup_blocked"
+            )
+            context.stages.append(
+                {
+                    "time": _utc_now(),
+                    "event": "protocol_handoff_complete",
+                    "status": context.protocol_response_status,
+                }
+            )
+            return protocol
+        except Exception as exc:
+            context.handoff_error_stage = "protocol_request"
+            context.stages.append(
+                {
+                    "time": _utc_now(),
+                    "event": "protocol_handoff_failed",
+                    "error_type": type(exc).__name__,
+                }
+            )
+            raise
+        finally:
+            context.paused_request_resolution = capture.fail_paused_signup()
+            context.stages.append(
+                {
+                    "time": _utc_now(),
+                    "event": "paused_signup_resolved",
+                    "resolution": context.paused_request_resolution,
+                }
+            )
 
     def run(self) -> dict[str, Any]:
         try:
@@ -1172,6 +1291,7 @@ class RoxySignupLab:
         profile_id = ""
         succeeded = False
         browser = None
+        page = None
         capture: CdpCapture | None = None
         try:
             if existing_control:
@@ -1284,19 +1404,11 @@ class RoxySignupLab:
                 cookies = browser_context.cookies()
                 context_result.cookies = cookies
                 if self.mode == "handoff":
-                    if not capture.paused_signup:
-                        raise RuntimeError("ROXY_SIGNUP_REQUEST_NOT_PAUSED")
-                    paused_request = capture.paused_signup.get("request") or {}
-                    context_result.final_url = str(paused_request.get("url") or "")
-                    context_result.request_headers = dict(paused_request.get("headers") or {})
-                    html = page.content()
-                    context_result.ec_token, context_result.ssrt, context_result.ctx_id = self._extract_context(context_result.final_url, html)
-                    protocol = self._protocol_handoff(capture.paused_signup, cookies, self.capture_root / "protocol")
-                    context_result.http_status = int(protocol.get("status") or 0)
-                    context_result.content_type = str((protocol.get("classification") or {}).get("content_type") or "")
-                    context_result.classification = dict(protocol.get("classification") or {})
-                    context_result.status = "protocol_signup_ready" if context_result.classification.get("valid") else "signup_blocked"
-                    capture.fail_paused_signup()
+                    self._execute_paused_handoff(
+                        capture,
+                        cookies,
+                        context_result,
+                    )
                 else:
                     page.wait_for_timeout(1200)
                     context_result.final_url = page.url
@@ -1319,10 +1431,16 @@ class RoxySignupLab:
                 browser.close()
                 browser = None
         except Exception as exc:
+            if capture is not None and capture.paused_signup:
+                context_result.paused_request_resolution = capture.fail_paused_signup()
+            if page is not None and not context_result.window_hold_completed:
+                self._hold_window(page, context_result, reason="failure")
             context_result.status = "failed"
             context_result.classification = {**context_result.classification, "error": str(exc)}
             logger.error("Signup lab failed: {}", exc)
         finally:
+            if capture is not None and capture.paused_signup:
+                context_result.paused_request_resolution = capture.fail_paused_signup()
             if browser is not None:
                 try:
                     browser.close()
@@ -1421,6 +1539,15 @@ class RoxySignupLab:
             },
             "capture_integrity": context_result.capture_integrity,
             "stage_timing": context_result.stage_timing,
+            "handoff": {
+                "signup_request_paused": context_result.signup_request_paused,
+                "pause_to_protocol_ms": context_result.pause_to_protocol_ms,
+                "protocol_request_started": context_result.protocol_request_started,
+                "protocol_request_completed": context_result.protocol_request_completed,
+                "protocol_response_status": context_result.protocol_response_status,
+                "paused_request_resolution": context_result.paused_request_resolution,
+                "handoff_error_stage": context_result.handoff_error_stage,
+            },
             "profile_retained": context_result.profile_retained,
             "window_lifecycle": {
                 "headed": True,

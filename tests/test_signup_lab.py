@@ -122,6 +122,162 @@ def test_signup_lab_http1_transports_are_explicit() -> None:
     assert 'self.protocol_transport == "httpx"' in source
 
 
+def test_handoff_preserves_captured_cookie_header_and_order(tmp_path) -> None:
+    paused = {
+        "request": {
+            "url": "https://www.paypal.com/checkoutweb/signup?token=EC-12345678",
+            "headers": {
+                "Host": "www.paypal.com",
+                "cookie": "second=2; first=1",
+                "Referer": "https://www.paypal.com/pay",
+            },
+        }
+    }
+
+    headers = RoxySignupLab._handoff_headers(
+        paused,
+        [{"name": "fallback", "value": "unused"}],
+    )
+
+    assert headers["cookie"] == "second=2; first=1"
+    assert "Cookie" not in headers
+    assert "Host" not in headers
+
+
+def test_handoff_cookie_snapshot_fallback_preserves_snapshot_order() -> None:
+    headers = RoxySignupLab._handoff_headers(
+        {
+            "request": {
+                "url": "https://www.paypal.com/checkoutweb/signup?token=EC-12345678",
+                "headers": {},
+            }
+        },
+        [
+            {"name": "second", "value": "2"},
+            {"name": "first", "value": "1"},
+        ],
+    )
+
+    assert headers["Cookie"] == "second=2; first=1"
+
+
+def test_paused_handoff_runs_protocol_before_resolution_without_page_access(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    calls = []
+
+    class Capture:
+        paused_signup = {
+            "request": {
+                "url": (
+                    "https://www.paypal.com/checkoutweb/signup"
+                    "?token=EC-12345678&ssrt=123&ctxId=context"
+                ),
+                "headers": {"Cookie": "session=browser"},
+            }
+        }
+
+        @staticmethod
+        def pause_elapsed_ms():
+            return 17
+
+        @staticmethod
+        def fail_paused_signup():
+            calls.append("resolve")
+            return "failed_aborted"
+
+    lab = RoxySignupLab(
+        mode="handoff",
+        ba_token="BA-12345678ABCDEF",
+        phone="+38761123456",
+        proxy_line="proxy.test:3010:user:password",
+        capture_root=tmp_path / "capture",
+        protocol_transport="curl-chrome-http1",
+    )
+    context = BrowserSignupContext()
+
+    def protocol_handoff(paused, cookies, output):
+        calls.append("protocol")
+        assert context.protocol_request_started is True
+        assert context.signup_request_paused is True
+        return {
+            "status": 200,
+            "classification": {"valid": True, "content_type": "text/html"},
+        }
+
+    monkeypatch.setattr(lab, "_protocol_handoff", protocol_handoff)
+
+    lab._execute_paused_handoff(Capture(), [], context)
+
+    assert calls == ["protocol", "resolve"]
+    assert context.pause_to_protocol_ms == 17
+    assert context.protocol_request_completed is True
+    assert context.protocol_response_status == 200
+    assert context.paused_request_resolution == "failed_aborted"
+    assert context.ec_token == "EC-12345678"
+    assert "page." not in inspect.getsource(RoxySignupLab._execute_paused_handoff)
+
+
+def test_paused_handoff_resolves_request_when_protocol_raises(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    calls = []
+
+    class Capture:
+        paused_signup = {
+            "request": {
+                "url": "https://www.paypal.com/checkoutweb/signup?token=EC-12345678",
+                "headers": {},
+            }
+        }
+
+        @staticmethod
+        def pause_elapsed_ms():
+            return 3
+
+        @staticmethod
+        def fail_paused_signup():
+            calls.append("resolve")
+            return "failed_aborted"
+
+    lab = RoxySignupLab(
+        mode="handoff",
+        ba_token="BA-12345678ABCDEF",
+        phone="+38761123456",
+        proxy_line="proxy.test:3010:user:password",
+        capture_root=tmp_path / "capture",
+    )
+    context = BrowserSignupContext()
+
+    def protocol_handoff(paused, cookies, output):
+        calls.append("protocol")
+        raise RuntimeError("protocol timeout")
+
+    monkeypatch.setattr(lab, "_protocol_handoff", protocol_handoff)
+
+    with pytest.raises(RuntimeError, match="protocol timeout"):
+        lab._execute_paused_handoff(Capture(), [], context)
+
+    assert calls == ["protocol", "resolve"]
+    assert context.protocol_request_completed is False
+    assert context.handoff_error_stage == "protocol_request"
+    assert context.paused_request_resolution == "failed_aborted"
+
+
+def test_handoff_defaults_to_thirty_second_headed_window_hold(tmp_path) -> None:
+    lab = RoxySignupLab(
+        mode="handoff",
+        ba_token="BA-12345678ABCDEF",
+        phone="+38761123456",
+        proxy_line="proxy.test:3010:user:password",
+        capture_root=tmp_path / "capture",
+    )
+
+    assert lab.window_hold_seconds == 30.0
+
+
 def test_manual_navigation_requires_explicit_existing_profile(tmp_path) -> None:
     with pytest.raises(ValueError, match="manual navigation requires"):
         RoxySignupLab(
