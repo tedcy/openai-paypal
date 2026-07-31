@@ -12,7 +12,7 @@ import urllib.parse
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping, cast
+from typing import Any, Iterable, Mapping, cast
 
 import httpx
 from loguru import logger
@@ -690,7 +690,8 @@ class RoxyApiClient:
         # Roxy 的 Local API 用 `headless` 字段控制无头模式。当前默认直接打开：
         # 不先 close，不强制 forceOpen；如需处理旧可见窗口复用，可通过环境变量
         # PAYPAL_ROXY_CLOSE_BEFORE_OPEN / PAYPAL_ROXY_FORCE_OPEN 显式开启。
-        args = ["--remote-allow-origins=*", "--disable-audio-output"]
+        args = _roxy_open_args(self.config.proxy_url)
+        http2_disabled = "--disable-http2" in args
         if self.config.headless and self.config.close_before_open:
             try:
                 self.close_profile(dir_id)
@@ -704,10 +705,11 @@ class RoxyApiClient:
             "headless": True if self.config.headless else False,
         }
         logger.debug(
-            "Opening Roxy browser dir_id={} headless={} forceOpen={} args={}",
+            "Opening Roxy browser dir_id={} headless={} forceOpen={} http2_disabled={} args={}",
             dir_id,
             payload["headless"],
             payload["forceOpen"],
+            http2_disabled,
             args,
         )
         response = self.request("POST", "/browser/open", json=payload)
@@ -835,6 +837,14 @@ def _redact_proxy_url(proxy_url: object = None) -> str:
 
 def _proxy_url_hash(proxy_url: object = None) -> str:
     return _sha256_hex(_canonical_proxy_url(proxy_url))
+
+
+def _roxy_open_args(proxy_url: object = None, base_args: Iterable[str] | None = None) -> list[str]:
+    """Build deterministic Roxy Chromium args without duplicating flags."""
+    args = list(base_args or ("--remote-allow-origins=*", "--disable-audio-output"))
+    if _canonical_proxy_url(proxy_url) and "--disable-http2" not in args:
+        args.append("--disable-http2")
+    return args
 
 
 def roxy_browser_matches_proxy(roxy_browser: dict[str, Any], proxy_url: object = None) -> bool:
