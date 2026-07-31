@@ -1,0 +1,63 @@
+{
+  "round": 40,
+  "mode": "reference_same_page_warmup",
+  "country": "BA",
+  "status": "approval_challenged_after_successful_first_party_warmup",
+  "reported_failure": "ROXY_SIGNUP_CHALLENGED",
+  "response_class": "APPROVAL_403_INTERSTITIAL_CAPTCHA",
+  "ba_hash": "7822effedee5dbc3",
+  "proxy_hash": "0684b4b14b19efed",
+  "warmup": {
+    "path": "/ba/home",
+    "status": 200,
+    "cookie_names": [
+      "enforce_policy",
+      "LANG",
+      "x-pp-s",
+      "tsrce",
+      "nsid",
+      "ts",
+      "ts_c"
+    ]
+  },
+  "approval_request": {
+    "cookie_names": [
+      "enforce_policy",
+      "LANG",
+      "x-pp-s",
+      "tsrce",
+      "nsid",
+      "ts",
+      "ts_c"
+    ],
+    "accept_language": "bs-BA,bs;q=0.9",
+    "dnt_header_present": false,
+    "client_hints_platform": "macOS"
+  },
+  "browser_transport": {
+    "http2_disabled_requested": true,
+    "https_http11_responses": 19,
+    "https_h2_responses": 0,
+    "request_events": 47,
+    "response_events": 20,
+    "main_documents": [
+      "/ba/home:200:http/1.1",
+      "/agreements/approve:403:http/1.1",
+      "/interstitial/:200:http/1.1",
+      "/captcha/:200:http/1.1"
+    ]
+  },
+  "capture_integrity": {
+    "valid": true,
+    "records": 143,
+    "invalid_lines": 0
+  },
+  "profile_cleanup": "exact_round_profile_deleted_after_interrupted_hold",
+  "evidence": {
+    "capture_path": "captures/signup-lab/round-040-same-page-warmup-reference"
+  },
+  "conclusion": "A same-Page first-party warm-up produced a healthy 200 home document and seven approval cookies, but approval still returned 403 followed by interstitial and CAPTCHA. Missing first-party cookies alone is not a sufficient explanation for the automatic Profile challenge.",
+  "next_round_focus": "Run the user-authorized test Profile after a verified complete state reset, preserving its persisted fingerprint and launch settings without random_env or mdf.",
+  "network_preflight_used": false,
+  "signup_request_captured": false
+}
