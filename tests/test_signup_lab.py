@@ -87,6 +87,18 @@ def test_signup_lab_inputs_route_bosnia_phone_and_proxy(tmp_path) -> None:
     assert lab.proxy_entry.username == "ba-user"
 
 
+def test_manual_navigation_requires_explicit_existing_profile(tmp_path) -> None:
+    with pytest.raises(ValueError, match="manual navigation requires"):
+        RoxySignupLab(
+            mode="reference",
+            ba_token="BA-12345678ABCDEF",
+            phone="+387644518746",
+            proxy_line="proxy.test:3010:user:password",
+            capture_root=tmp_path / "capture",
+            manual_navigation=True,
+        )
+
+
 def test_signup_lab_reserves_a_new_non_quarantined_proxy_for_each_profile(tmp_path) -> None:
     source = tmp_path / "inputs.json"
     first = "proxy-a.test:3010:user:password-a"
@@ -584,6 +596,65 @@ def test_approval_navigation_stops_at_committed_403() -> None:
         )
 
     assert calls[0][1] == {"wait_until": "commit", "timeout": 45000}
+    assert context.challenge_markers == ["approval_http_403"]
+
+
+def test_manual_navigation_waits_for_cdp_approval_document(tmp_path) -> None:
+    capture = SimpleNamespace(main_documents=[])
+
+    class Page:
+        waits = 0
+
+        def wait_for_timeout(self, milliseconds):
+            self.waits += 1
+            capture.main_documents.append(
+                {
+                    "path": "/agreements/approve",
+                    "status": 200,
+                    "protocol": "http/1.1",
+                }
+            )
+
+    lab = object.__new__(RoxySignupLab)
+    lab.capture_root = tmp_path
+    context = BrowserSignupContext(profile_id="existing-profile")
+
+    lab._wait_for_manual_approval(
+        Page(),
+        capture,
+        context,
+        timeout_seconds=1,
+    )
+
+    ready = json.loads((tmp_path / "manual_navigation_ready.json").read_text(encoding="utf-8"))
+    assert ready["ready"] is True
+    assert ready["page"] == "about:blank"
+    assert "existing-profile" not in json.dumps(ready)
+    assert context.stages[-1] == {
+        "time": context.stages[-1]["time"],
+        "event": "manual_approval_observed",
+        "status": 200,
+    }
+
+
+def test_manual_navigation_stops_on_cdp_approval_403(tmp_path) -> None:
+    capture = SimpleNamespace(
+        main_documents=[
+            {"path": "/agreements/approve", "status": 403, "protocol": "http/1.1"}
+        ]
+    )
+    lab = object.__new__(RoxySignupLab)
+    lab.capture_root = tmp_path
+    context = BrowserSignupContext(profile_id="existing-profile")
+
+    with pytest.raises(RuntimeError, match="ROXY_SIGNUP_CHALLENGED"):
+        lab._wait_for_manual_approval(
+            SimpleNamespace(wait_for_timeout=lambda milliseconds: None),
+            capture,
+            context,
+            timeout_seconds=1,
+        )
+
     assert context.challenge_markers == ["approval_http_403"]
 
 

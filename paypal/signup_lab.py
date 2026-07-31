@@ -395,6 +395,7 @@ class BrowserSignupContext:
     browser_force_open_requested: bool = False
     window_hold_seconds: float = 0.0
     window_hold_completed: bool = False
+    manual_navigation: bool = False
 
 
 def classify_signup_ui(url: str) -> str:
@@ -567,6 +568,7 @@ class RoxySignupLab:
         warmup: bool = False,
         existing_profile_id: str = "",
         existing_profile_name: str = "",
+        manual_navigation: bool = False,
     ):
         if mode not in {"reference", "handoff"}:
             raise ValueError(f"unsupported Roxy signup lab mode: {mode}")
@@ -582,12 +584,15 @@ class RoxySignupLab:
         self.warmup = bool(warmup)
         self.existing_profile_id = str(existing_profile_id or "").strip()
         self.existing_profile_name = str(existing_profile_name or "").strip()
+        self.manual_navigation = bool(manual_navigation)
         if self.existing_profile_id and mode != "reference":
             raise ValueError("existing Roxy Profile is supported only in reference mode")
         if self.existing_profile_name and not self.existing_profile_id:
             raise ValueError("existing Roxy Profile name verification requires an explicit Profile ID")
         if self.existing_profile_id and self.warmup:
             raise ValueError("clean existing-Profile reference cannot also use warm-up state")
+        if self.manual_navigation and not self.existing_profile_id:
+            raise ValueError("manual navigation requires an explicit existing Roxy Profile")
 
     def _click_first(self, page: Any, labels: tuple[str, ...]) -> bool:
         for label in labels:
@@ -896,6 +901,57 @@ class RoxySignupLab:
         self._hold_window(page, context, reason="runtime_gate_failure")
         raise RuntimeError("ROXY_RUNTIME_FINGERPRINT_MISMATCH")
 
+    def _wait_for_manual_approval(
+        self,
+        page: Any,
+        capture: CdpCapture,
+        context: BrowserSignupContext,
+        *,
+        timeout_seconds: float = 120.0,
+    ) -> None:
+        """Wait for an address-bar navigation already observed by CDP."""
+        context.stages.append({"time": _utc_now(), "event": "manual_navigation_ready"})
+        _write_json(
+            self.capture_root / "manual_navigation_ready.json",
+            {
+                "ready": True,
+                "profile_hash": _hash(context.profile_id),
+                "page": "about:blank",
+                "created_at": _utc_now(),
+            },
+        )
+        logger.info(
+            "Signup lab manual navigation ready profile_hash={} timeout_seconds={}",
+            _hash(context.profile_id),
+            timeout_seconds,
+        )
+        deadline = time.monotonic() + max(1.0, float(timeout_seconds))
+        while time.monotonic() < deadline:
+            approval_documents = [
+                item
+                for item in capture.main_documents
+                if str(item.get("path") or "").rstrip("/") == "/agreements/approve"
+            ]
+            if approval_documents:
+                document = approval_documents[-1]
+                status = int(document.get("status") or 0)
+                context.stages.append(
+                    {
+                        "time": _utc_now(),
+                        "event": "manual_approval_observed",
+                        "status": status,
+                    }
+                )
+                if status >= 400:
+                    context.challenge_markers = list(
+                        dict.fromkeys([*context.challenge_markers, f"approval_http_{status}"])
+                    )
+                    raise RuntimeError("ROXY_SIGNUP_CHALLENGED")
+                if 200 <= status < 400:
+                    return
+            page.wait_for_timeout(250)
+        raise RuntimeError("ROXY_MANUAL_NAVIGATION_TIMEOUT")
+
     @staticmethod
     def _extract_context(url: str, html: str) -> tuple[str, str, str]:
         material = f"{url}\n{html}"
@@ -980,6 +1036,7 @@ class RoxySignupLab:
             ),
             browser_force_open_requested=(False if existing_control else bool(config.force_open)),
             window_hold_seconds=self.window_hold_seconds,
+            manual_navigation=self.manual_navigation,
         )
         if not existing_control:
             context_result.browser_create_args = _roxy_profile_startup_args(
@@ -1085,7 +1142,10 @@ class RoxySignupLab:
                 approval_url = f"https://www.paypal.com/agreements/approve?ba_token={self.ba_token}"
                 context_result.stages.append({"time": _utc_now(), "event": "approval_start"})
                 try:
-                    self._navigate_to_approval(page, approval_url, context_result)
+                    if self.manual_navigation:
+                        self._wait_for_manual_approval(page, capture, context_result)
+                    else:
+                        self._navigate_to_approval(page, approval_url, context_result)
                     self._drive_to_signup(page, capture, context_result)
                 except Exception:
                     self._capture_failure_page(page, context_result)
@@ -1217,6 +1277,7 @@ class RoxySignupLab:
             "profile_freeze": context_result.profile_freeze,
             "runtime_fingerprint": context_result.runtime_fingerprint,
             "state_reset": context_result.state_reset,
+            "manual_navigation": context_result.manual_navigation,
             "warmup": context_result.warmup,
             "http_status": context_result.http_status,
             "classification": context_result.classification,
@@ -1417,6 +1478,7 @@ def run_signup_lab_from_file(
     warmup: bool = False,
     existing_profile_id: str = "",
     existing_profile_name: str = "",
+    manual_navigation: bool = False,
 ) -> dict[str, Any]:
     existing_control = bool(str(existing_profile_id or "").strip())
     if existing_control and mode != "reference":
@@ -1475,6 +1537,7 @@ def run_signup_lab_from_file(
             warmup=warmup,
             existing_profile_id=existing_profile_id,
             existing_profile_name=existing_profile_name,
+            manual_navigation=manual_navigation,
         ).run()
         if existing_control:
             rotation["approval_403_quarantined"] = False

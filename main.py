@@ -102,6 +102,14 @@ def main():
         help="Optional exact name check for --signup-lab-existing-profile-id",
     )
     parser.add_argument(
+        "--signup-lab-manual-navigation",
+        action="store_true",
+        help=(
+            "After clean existing-Profile setup and CDP attachment, wait for an "
+            "address-bar approval navigation instead of calling Page.navigate"
+        ),
+    )
+    parser.add_argument(
         "--phone",
         default="",
         help="E.164 phone; supported prefixes: +55, +66, +387 and +1"
@@ -233,6 +241,7 @@ def main():
             warmup=args.signup_lab_warmup,
             existing_profile_id=args.signup_lab_existing_profile_id,
             existing_profile_name=args.signup_lab_existing_profile_name,
+            manual_navigation=args.signup_lab_manual_navigation,
         )
         print(json.dumps(sanitize_for_log(result), indent=2, ensure_ascii=False))
         sys.exit(0 if result.get("status") in {"browser_signup_ready", "protocol_signup_ready"} else 1)
