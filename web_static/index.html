@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>PayPal 协议支付网页端</title>
-  <link rel="stylesheet" href="/static/app.css?v=ui-wrap-1" />
+  <link rel="stylesheet" href="/static/app.css?v=protocol-routes-1" />
 </head>
 <body>
   <div class="shell">
@@ -32,28 +32,36 @@
             <span>手机号</span>
             <input id="phone" name="phone" type="tel" required placeholder="E.164：+55… / +66… / +387… / +1…" />
           </label>
-          <label class="check-row">
+          <label>
+            <span>执行路线</span>
+            <select id="executionMode" name="executionMode">
+              <option value="standard" selected>标准完整流程（现有 Roxy / Headless 可选）</option>
+              <option value="protocol_signup">纯协议到 Signup（不发 OTP）</option>
+              <option value="protocol_full">纯协议完整流程（继续 OTP / 授权）</option>
+            </select>
+          </label>
+          <label id="smsbowerWrap" class="check-row">
             <input id="smsbowerEnabled" name="smsbowerEnabled" type="checkbox" />
             <span>使用 SMSBower 自动接码</span>
           </label>
           <div class="form-row">
-            <label>
+            <label id="maxCardAttemptsWrap">
               <span>最大换卡次数</span>
               <input id="maxCardAttempts" name="maxCardAttempts" type="number" min="1" max="20" value="5" />
             </label>
-            <label>
+            <label id="maxFlowAttemptsWrap">
               <span>整套流程重试</span>
               <input id="maxFlowAttempts" name="maxFlowAttempts" type="number" min="1" max="5" value="1" />
             </label>
-            <label>
+            <label id="maxAuthorizeAttemptsWrap">
               <span>授权尝试次数（最多2）</span>
               <input id="maxAuthorizeAttempts" name="maxAuthorizeAttempts" type="number" min="1" max="2" value="2" />
             </label>
-            <label>
+            <label id="cardRetryDelayWrap">
               <span>换卡等待秒数</span>
               <input id="cardRetryDelay" name="cardRetryDelay" type="number" min="0" max="60" step="0.5" value="6" />
             </label>
-            <label>
+            <label id="cardRetryJitterWrap">
               <span>等待随机抖动</span>
               <input id="cardRetryJitter" name="cardRetryJitter" type="number" min="0" max="30" step="0.5" value="2" />
             </label>
@@ -83,7 +91,7 @@
                 spellcheck="false"
               />
             </label>
-            <label>
+            <label id="fingerprintSourceWrap">
               <span>浏览器指纹来源</span>
               <select id="fingerprintSource" name="fingerprintSource">
                 <option value="headless" selected>本地 Headless</option>
@@ -92,7 +100,7 @@
                 <option value="auto">自动：优先 Roxy</option>
               </select>
             </label>
-            <label>
+            <label id="datadomeModeWrap">
               <span>DataDome 模式</span>
               <select id="datadomeMode" name="datadomeMode">
                 <option value="headless" selected>本地 Headless</option>
@@ -102,7 +110,7 @@
                 <option value="off">关闭</option>
               </select>
             </label>
-            <label>
+            <label id="mtrRuntimeWrap">
               <span>MTR sealedResult</span>
               <select id="mtrRuntime" name="mtrRuntime">
                 <option value="headless" selected>本地 Headless</option>
@@ -113,6 +121,9 @@
                 <option value="off">关闭</option>
               </select>
             </label>
+            <p id="protocolPresetHint" class="protocol-preset-hint span-all hidden">
+              固定预设：iOS 18 · CriOS 136 · HTTP/1.1 · Risk protocol · Roxy 0
+            </p>
             <label class="check-row">
               <input id="recordTraffic" name="recordTraffic" type="checkbox" />
               <span>测试：自动记录程序发包</span>
@@ -142,7 +153,8 @@
           </div>
           <button id="startBtn" class="primary" type="submit">开始执行</button>
         </form>
-        <p class="hint">默认的本地 Headless 模式需要 Playwright：<code>pip install -r requirements-headless.txt &amp;&amp; python -m playwright install chromium</code>。未安装时可把上面三项切到程序随机生成、协议边缘模拟和程序模板生成。</p>
+        <p class="hint">“纯协议到 Signup”只验证页面并安全停止；“纯协议完整流程”会继续等待 OTP。两种纯协议路线都由服务端固定为 iOS 18 / CriOS 136 / HTTP/1.1，不读取上面三项或 .env 的 Roxy 默认值。</p>
+        <p class="hint">标准模式下，本地 Headless 需要 Playwright：<code>pip install -r requirements-headless.txt &amp;&amp; python -m playwright install chromium</code>。</p>
         <p class="hint">手动模式执行到短信验证时会暂停等待输入；换号必须保持同一国家。SMSBower 仅支持巴西，留空手机号时默认 BR。代理按每个任务生效。</p>
         <p class="hint">安全边界：仅可在你明确获授权的封闭 CTF 环境中运行，请勿用于真实支付系统。</p>
       </section>
@@ -214,6 +226,6 @@
   </div>
 
   <div id="toast" class="toast hidden"></div>
-  <script src="/static/app.js?v=runtime-defaults-1"></script>
+  <script src="/static/app.js?v=protocol-routes-1"></script>
 </body>
 </html>

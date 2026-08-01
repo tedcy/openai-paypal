@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 import web
@@ -76,6 +78,7 @@ def test_runtime_defaults_read_roxy_modes_from_environment(
     monkeypatch.setenv("PAYPAL_RISK_SIGNALS_MODE", "roxy")
 
     assert web.runtime_defaults() == {
+        "execution_mode": "standard",
         "fingerprint_source": "roxy",
         "datadome_mode": "roxy",
         "mtr_runtime": "roxy",
@@ -92,5 +95,222 @@ def test_runtime_defaults_do_not_return_unrelated_environment_values(
     defaults = web.runtime_defaults()
 
     assert defaults["fingerprint_source"] == "headless"
+    assert defaults["execution_mode"] == "standard"
     assert "PAYPAL_ROXY_API_KEY" not in defaults
     assert "secret-value" not in defaults.values()
+
+
+def test_protocol_signup_overrides_roxy_runtime_and_requires_manual_phone() -> None:
+    job = web.create_job(
+        owner_device_id="test-protocol-signup",
+        ba_token="BA-TESTTOKEN123456",
+        phone="+38761123456",
+        debug=False,
+        max_card_attempts=5,
+        execution_mode="protocol_signup",
+        fingerprint_source="client-forged-runtime",
+        datadome_mode="client-forged-runtime",
+        mtr_runtime="client-forged-runtime",
+        risk_signals_mode="client-forged-runtime",
+    )
+
+    assert job.execution_mode == "protocol_signup"
+    assert job.fingerprint_source == "random"
+    assert job.datadome_mode == "protocol"
+    assert job.mtr_runtime == "python_generated"
+    assert job.risk_signals_mode == "protocol"
+    assert job.protocol_transport == "curl-chrome-http1"
+
+    with pytest.raises(ValueError, match="必须填写 E.164"):
+        web.create_job(
+            owner_device_id="test-protocol-signup-empty",
+            ba_token="BA-TESTTOKEN123456",
+            phone="",
+            debug=False,
+            max_card_attempts=5,
+            execution_mode="protocol_signup",
+            sms_provider="smsbower",
+        )
+
+    with pytest.raises(ValueError, match="不使用 SMSBower"):
+        web.create_job(
+            owner_device_id="test-protocol-signup-sms",
+            ba_token="BA-TESTTOKEN123456",
+            phone="+5500000000000",
+            debug=False,
+            max_card_attempts=5,
+            execution_mode="protocol_signup",
+            sms_provider="smsbower",
+        )
+
+
+def test_standard_mode_keeps_runtime_choices_and_rejects_unknown_execution() -> None:
+    job = web.create_job(
+        owner_device_id="test-standard-runtime",
+        ba_token="BA-TESTTOKEN123456",
+        phone="+12025550123",
+        debug=False,
+        max_card_attempts=5,
+        fingerprint_source="roxy",
+        datadome_mode="roxy",
+        mtr_runtime="roxy",
+        risk_signals_mode="roxy",
+    )
+    assert job.execution_mode == "standard"
+    assert job.fingerprint_source == "roxy"
+    assert job.protocol_transport == ""
+
+    with pytest.raises(ValueError, match="执行路线不正确"):
+        web.create_job(
+            owner_device_id="test-unknown-mode",
+            ba_token="BA-TESTTOKEN123456",
+            phone="+12025550123",
+            debug=False,
+            max_card_attempts=5,
+            execution_mode="unknown",
+        )
+
+
+def test_protocol_signup_runner_stops_before_full_flow(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: dict[str, object] = {}
+
+    class _Flow:
+        def __init__(self, *args, **kwargs) -> None:
+            calls["kwargs"] = kwargs
+
+        def run_until_signup(self):
+            calls["run_until_signup"] = True
+            return {
+                "status": "protocol_signup_ready",
+                "http_status": 200,
+                "signup_url": (
+                    "https://www.paypal.com/checkoutweb/signup"
+                    "?ba_token=BA-RAWVALUE123&token=EC-RAWVALUE123"
+                ),
+                "classification": {"valid": True},
+            }
+
+        def run(self):
+            raise AssertionError("protocol_signup must not execute the full flow")
+
+    monkeypatch.setattr(web, "WebPayPalFlow", _Flow)
+    job = web.create_job(
+        owner_device_id="test-protocol-runner",
+        ba_token="BA-TESTTOKEN123456",
+        phone="+38761123456",
+        debug=False,
+        max_card_attempts=5,
+        execution_mode="protocol_signup",
+    )
+
+    web.run_job(job)
+
+    kwargs = calls["kwargs"]
+    assert isinstance(kwargs, dict)
+    assert calls["run_until_signup"] is True
+    assert kwargs["protocol_transport"] == "curl-chrome-http1"
+    assert kwargs["protocol_impersonate"] == "chrome136"
+    assert kwargs["fingerprint_source"] == "random"
+    assert kwargs["datadome_mode"] == "protocol"
+    assert kwargs["mtr_runtime"] == "python_generated"
+    assert kwargs["risk_signals_mode"] == "protocol"
+    assert kwargs["browser_profile_seed"]["chrome_major"] == 136
+    assert kwargs["browser_profile_seed"]["ua_client_hints_enabled"] is False
+    assert job.status == "completed"
+    assert job.stage == "纯协议 Signup 200，已安全停止"
+    assert job.result["roxy_api_calls"] == 0
+    assert job.result["stopped_before_signup_mutation"] is True
+
+    public = job.to_dict()
+    assert "BA-RAWVALUE123" not in public["result"]["signup_url"]
+    assert "EC-RAWVALUE123" not in public["result"]["signup_url"]
+
+
+def test_protocol_signup_failure_retains_sanitized_diagnostics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _Flow:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def run_until_signup(self):
+            return {
+                "status": "failed",
+                "error": "PROTOCOL_APPROVAL_APPLICATION_MISSING",
+                "signup_url": "https://www.paypal.com/checkoutweb/genericError?ba_token=BA-RAWVALUE123",
+                "classification": {"valid": False},
+            }
+
+    monkeypatch.setattr(web, "WebPayPalFlow", _Flow)
+    job = web.create_job(
+        owner_device_id="test-protocol-failed",
+        ba_token="BA-TESTTOKEN123456",
+        phone="+38761123456",
+        debug=False,
+        max_card_attempts=5,
+        execution_mode="protocol_signup",
+    )
+
+    web.run_job(job)
+
+    assert job.status == "failed"
+    assert job.result is not None
+    public = job.to_dict()
+    assert public["result"]["classification"] == {"valid": False}
+    assert "BA-RAWVALUE123" not in public["result"]["signup_url"]
+
+
+def test_protocol_full_runner_uses_full_flow_without_roxy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: dict[str, object] = {}
+
+    class _Flow:
+        def __init__(self, *args, **kwargs) -> None:
+            calls["kwargs"] = kwargs
+            self.job = kwargs["job"]
+
+        def run(self):
+            calls["run"] = True
+            calls["otp"] = self.job.wait_for_input("请输入6位短信验证码")
+            return {"status": "success"}
+
+        def run_until_signup(self):
+            raise AssertionError("protocol_full must execute the full flow")
+
+    monkeypatch.setattr(web, "WebPayPalFlow", _Flow)
+    job = web.create_job(
+        owner_device_id="test-protocol-full",
+        ba_token="BA-TESTTOKEN123456",
+        phone="+12025550123",
+        debug=False,
+        max_card_attempts=5,
+        execution_mode="protocol_full",
+    )
+    job.submit_input("123456")
+
+    web.run_job(job)
+
+    assert calls["run"] is True
+    assert calls["otp"] == "123456"
+    assert job.status == "completed"
+    assert job.result["execution_mode"] == "protocol_full"
+    assert job.result["roxy_api_calls"] == 0
+    assert job.result["protocol_transport"] == "curl-chrome-http1"
+
+
+def test_web_ui_exposes_and_locks_protocol_routes() -> None:
+    root = Path(__file__).resolve().parents[1]
+    html = (root / "web_static" / "index.html").read_text(encoding="utf-8")
+    javascript = (root / "web_static" / "app.js").read_text(encoding="utf-8")
+
+    assert 'value="standard"' in html
+    assert 'value="protocol_signup"' in html
+    assert 'value="protocol_full"' in html
+    assert 'execution_mode: executionMode' in javascript
+    assert 'fingerprint_source: "random"' in javascript
+    assert 'datadome_mode: "protocol"' in javascript
+    assert 'mtr_runtime: "python_generated"' in javascript
+    assert '$("#smsbowerEnabled").disabled = signupProbe' in javascript

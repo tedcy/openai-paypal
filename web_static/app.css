@@ -72,6 +72,8 @@ button:disabled { opacity: .5; cursor: not-allowed; transform: none; }
 .ghost { background: rgba(255,255,255,.05); border: 1px solid var(--line); }
 .small-button { padding: 7px 10px; border-radius: 10px; font-size: 12px; }
 .hint { margin: 14px 0 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.protocol-preset-hint { margin: 0; padding: 11px 13px; border: 1px solid rgba(99, 165, 255, .32); border-radius: 12px; background: rgba(99, 165, 255, .08); color: var(--blue); font-size: 13px; line-height: 1.5; }
+select:disabled, input:disabled { opacity: .65; cursor: not-allowed; }
 
 .jobs-list { display: grid; gap: 10px; max-height: 304px; overflow: auto; padding-right: 4px; }
 .job-item { display: grid; gap: 5px; padding: 13px; border: 1px solid var(--line); background: rgba(255,255,255,.04); border-radius: 16px; cursor: pointer; }

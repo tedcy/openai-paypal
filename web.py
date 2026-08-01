@@ -29,6 +29,15 @@ from loguru import logger
 from paypal.flow import PayPalFlow
 from paypal.models import BillingAddress, CardInfo, UserInfo, generate_address, generate_card, generate_user
 from paypal.country import parse_ba_token, profile_for_country, profile_for_phone
+from paypal.protocol_profile import (
+    PROTOCOL_DATADOME_MODE,
+    PROTOCOL_FINGERPRINT_SOURCE,
+    PROTOCOL_IMPERSONATE,
+    PROTOCOL_MTR_RUNTIME,
+    PROTOCOL_RISK_SIGNALS_MODE,
+    PROTOCOL_TRANSPORT,
+    build_ios_crios136_protocol_profile,
+)
 from paypal.proxy import ProxyConfig, build_proxy_config
 from paypal.traffic_recorder import (
     TrafficRecorder,
@@ -105,6 +114,8 @@ DATADOME_MODE_CHOICES = {"protocol", "edge", "roxy", "browser", "headless", "loc
 MTR_RUNTIME_CHOICES = {"python_generated", "python", "protocol", "roxy", "browser", "headless", "local_headless", "playwright", "local_playwright", "auto", "block", "off"}
 RISK_SIGNALS_MODE_CHOICES = {"protocol", "python", "synthetic", "template", "roxy", "browser", "headless", "local_headless", "playwright", "local_playwright", "auto", "off"}
 SMS_PROVIDER_CHOICES = {"manual", "smsbower"}
+EXECUTION_MODE_CHOICES = {"standard", "protocol_signup", "protocol_full"}
+PURE_PROTOCOL_EXECUTION_MODES = {"protocol_signup", "protocol_full"}
 ROXY_LIKE_MODE_VALUES = {"roxy", "browser", "real_browser", "chrome", "chromium", "roxy_browser", "roxybrowser"}
 
 ACTIVE_STATUSES = {"queued", "running", "awaiting_otp"}
@@ -157,6 +168,7 @@ def runtime_defaults() -> dict[str, str]:
         "PAYPAL_MTR_RUNTIME", MTR_RUNTIME_CHOICES, "headless"
     )
     return {
+        "execution_mode": "standard",
         "fingerprint_source": fingerprint_source,
         "datadome_mode": datadome_mode,
         "mtr_runtime": mtr_runtime,
@@ -387,6 +399,7 @@ class WebJob:
     owner_device_id: str
     ba_token: str
     phone: str
+    execution_mode: str = "standard"
     sms_provider: str = "manual"
     debug: bool = False
     max_card_attempts: int = 5
@@ -401,6 +414,7 @@ class WebJob:
     datadome_mode: str = "headless"
     mtr_runtime: str = "headless"
     risk_signals_mode: str = "headless"
+    protocol_transport: str = ""
     record_traffic: bool = False
     traffic_dir: str = ""
     compare_roxy_capture: str = ""
@@ -479,11 +493,29 @@ class WebJob:
             self.updated_at = now_ts()
             self._condition.notify_all()
 
-    def complete(self, result: dict[str, Any]) -> None:
+    def complete(self, result: dict[str, Any], *, stage: str = "已完成") -> None:
         with self._condition:
             self.status = "completed"
-            self.stage = "已完成"
+            self.stage = stage
             self.result = result
+            self.finished_at = now_ts()
+            self.updated_at = now_ts()
+            self.awaiting_prompt = ""
+            self._condition.notify_all()
+
+    def fail_result(
+        self,
+        result: dict[str, Any],
+        *,
+        stage: str,
+        error: str,
+    ) -> None:
+        """Finish a non-exceptional probe failure while retaining diagnostics."""
+        with self._condition:
+            self.status = "failed"
+            self.stage = stage
+            self.result = result
+            self.error = sanitize_web_visible_text(error, fallback="纯协议 Signup 未通过")
             self.finished_at = now_ts()
             self.updated_at = now_ts()
             self.awaiting_prompt = ""
@@ -516,6 +548,7 @@ class WebJob:
                 "duration": (self.finished_at or now_ts()) - (self.started_at or self.created_at),
                 "status": self.status,
                 "stage": self.stage,
+                "execution_mode": self.execution_mode,
                 "ba_token": mask_middle(self.ba_token),
                 "phone": mask_phone(self.phone),
                 "sms_provider": self.sms_provider,
@@ -531,6 +564,8 @@ class WebJob:
                 "fingerprint_source": self.fingerprint_source,
                 "datadome_mode": self.datadome_mode,
                 "mtr_runtime": self.mtr_runtime,
+                "risk_signals_mode": self.risk_signals_mode,
+                "protocol_transport": self.protocol_transport,
                 "record_traffic": self.record_traffic,
                 "traffic_dir": self.traffic_dir,
                 "compare_roxy_capture": self.compare_roxy_capture,
@@ -743,6 +778,7 @@ def create_job(
     phone: str,
     debug: bool,
     max_card_attempts: int,
+    execution_mode: str = "standard",
     sms_provider: str = "manual",
     max_flow_attempts: int = 1,
     max_authorize_attempts: int = 2,
@@ -764,6 +800,9 @@ def create_job(
     except ValueError as exc:
         raise ValueError(str(exc)) from exc
     phone = (phone or "").strip()
+    execution_mode = (execution_mode or "standard").strip().lower().replace("-", "_")
+    if execution_mode not in EXECUTION_MODE_CHOICES:
+        raise ValueError("执行路线不正确")
     sms_provider = (sms_provider or "manual").strip().lower()
     if sms_provider not in SMS_PROVIDER_CHOICES:
         raise ValueError("短信接码方式不正确")
@@ -775,6 +814,11 @@ def create_job(
         country_profile = profile_for_phone(phone) if phone else profile_for_country("BR")
     except ValueError as exc:
         raise ValueError(str(exc)) from exc
+    if execution_mode == "protocol_signup":
+        if not phone:
+            raise ValueError("纯协议 Signup 模式必须填写 E.164 手机号")
+        if sms_provider != "manual":
+            raise ValueError("纯协议 Signup 模式不使用 SMSBower")
     if sms_provider == "smsbower":
         if country_profile.country != "BR":
             raise ValueError("SMSBower 仅支持巴西 +55 号码")
@@ -813,18 +857,26 @@ def create_job(
         raise ValueError("链式代理 URL 太长")
     if bool(proxy_enabled) and proxy_mode == "custom" and not proxy_url:
         raise ValueError("启用自定义链式代理时必须填写代理 URL")
-    fingerprint_source = (fingerprint_source or "headless").strip().lower().replace("-", "_")
-    if fingerprint_source not in FINGERPRINT_SOURCE_CHOICES:
-        raise ValueError("浏览器指纹来源不正确")
-    datadome_mode = (datadome_mode or "headless").strip().lower().replace("-", "_")
-    if datadome_mode not in DATADOME_MODE_CHOICES:
-        raise ValueError("DataDome 模式不正确")
-    mtr_runtime = (mtr_runtime or "headless").strip().lower().replace("-", "_")
-    if mtr_runtime not in MTR_RUNTIME_CHOICES:
-        raise ValueError("MTR 模式不正确")
-    risk_signals_mode = (risk_signals_mode or "headless").strip().lower().replace("-", "_")
-    if risk_signals_mode not in RISK_SIGNALS_MODE_CHOICES:
-        raise ValueError("browser risk 模式不正确")
+    if execution_mode in PURE_PROTOCOL_EXECUTION_MODES:
+        fingerprint_source = PROTOCOL_FINGERPRINT_SOURCE
+        datadome_mode = PROTOCOL_DATADOME_MODE
+        mtr_runtime = PROTOCOL_MTR_RUNTIME
+        risk_signals_mode = PROTOCOL_RISK_SIGNALS_MODE
+        protocol_transport = PROTOCOL_TRANSPORT
+    else:
+        fingerprint_source = (fingerprint_source or "headless").strip().lower().replace("-", "_")
+        if fingerprint_source not in FINGERPRINT_SOURCE_CHOICES:
+            raise ValueError("浏览器指纹来源不正确")
+        datadome_mode = (datadome_mode or "headless").strip().lower().replace("-", "_")
+        if datadome_mode not in DATADOME_MODE_CHOICES:
+            raise ValueError("DataDome 模式不正确")
+        mtr_runtime = (mtr_runtime or "headless").strip().lower().replace("-", "_")
+        if mtr_runtime not in MTR_RUNTIME_CHOICES:
+            raise ValueError("MTR 模式不正确")
+        risk_signals_mode = (risk_signals_mode or "headless").strip().lower().replace("-", "_")
+        if risk_signals_mode not in RISK_SIGNALS_MODE_CHOICES:
+            raise ValueError("browser risk 模式不正确")
+        protocol_transport = ""
     record_traffic = bool(record_traffic)
     traffic_dir = (traffic_dir or "").strip()
     compare_roxy_capture = (compare_roxy_capture or "").strip()
@@ -847,6 +899,7 @@ def create_job(
         owner_device_id=owner_device_id,
         ba_token=ba_token,
         phone=phone,
+        execution_mode=execution_mode,
         sms_provider=sms_provider,
         debug=debug,
         max_card_attempts=max_card_attempts,
@@ -861,6 +914,7 @@ def create_job(
         datadome_mode=datadome_mode,
         mtr_runtime=mtr_runtime,
         risk_signals_mode=risk_signals_mode,
+        protocol_transport=protocol_transport,
         record_traffic=record_traffic,
         traffic_dir=traffic_dir,
         compare_roxy_capture=compare_roxy_capture,
@@ -923,14 +977,24 @@ def run_job(job: WebJob) -> None:
             card = generate_card(proxy_url=proxy_config.url)
             address = generate_address(country_profile)
             job.set_generated(public_generated_payload(user, card, address))
+            pure_protocol = job.execution_mode in PURE_PROTOCOL_EXECUTION_MODES
+            browser_profile_seed = (
+                build_ios_crios136_protocol_profile(country_profile)
+                if pure_protocol
+                else None
+            )
 
             logger.info("Web job started: {}", job.id)
             logger.info("Proxy: {}", proxy_config.label)
             logger.info(
-                "Runtime modes: fingerprint={} datadome={} mtr={}",
+                "Runtime modes: execution={} fingerprint={} datadome={} mtr={} "
+                "risk={} transport={}",
+                job.execution_mode,
                 job.fingerprint_source,
                 job.datadome_mode,
                 job.mtr_runtime,
+                job.risk_signals_mode,
+                job.protocol_transport or "default",
             )
             logger.info("User: {} {}", user.first_name, user.last_name)
             logger.info("Email: {}", mask_email(user.email))
@@ -962,9 +1026,43 @@ def run_job(job: WebJob) -> None:
                 risk_signals_mode=job.risk_signals_mode,
                 sms_provider=sms_provider,
                 country_profile=country_profile,
+                protocol_transport=job.protocol_transport or None,
+                browser_profile_seed=browser_profile_seed,
+                protocol_impersonate=(PROTOCOL_IMPERSONATE if pure_protocol else None),
                 job=job,
             )
-            result = flow.run()
+            if job.execution_mode == "protocol_signup":
+                job.set_status("running", "纯协议：验证 Signup 页面")
+                result = flow.run_until_signup()
+            else:
+                result = flow.run()
+
+            result = dict(result)
+            result.update(
+                {
+                    "execution_mode": job.execution_mode,
+                    "protocol_transport": job.protocol_transport,
+                    "risk_signals_mode": job.risk_signals_mode,
+                }
+            )
+            if pure_protocol:
+                result["roxy_api_calls"] = 0
+
+            if job.execution_mode == "protocol_signup":
+                result["stopped_before_signup_mutation"] = True
+                if result.get("status") == "protocol_signup_ready":
+                    job.complete(result, stage="纯协议 Signup 200，已安全停止")
+                else:
+                    job.fail_result(
+                        result,
+                        stage="纯协议 Signup 未通过",
+                        error=str(
+                            result.get("error")
+                            or "PROTOCOL_SIGNUP_NOT_READY: signup document was not valid"
+                        ),
+                    )
+                return
+
             job.complete(result)
         except BaseException as exc:  # keep worker alive and expose details in UI
             logger.error("Web job failed: {}", redact_text(exc))
@@ -1133,12 +1231,17 @@ class WebHandler(BaseHTTPRequestHandler):
                     data.get("mtr_runtime", defaults["mtr_runtime"])
                     or defaults["mtr_runtime"]
                 )
+                execution_mode = str(
+                    data.get("execution_mode", defaults["execution_mode"])
+                    or defaults["execution_mode"]
+                )
                 job = create_job(
                     owner_device_id=self.get_device_id(),
                     ba_token=data.get("ba_token", ""),
                     phone=data.get("phone", ""),
                     debug=bool(data.get("debug", False)),
                     max_card_attempts=int(data.get("max_card_attempts", 5) or 5),
+                    execution_mode=execution_mode,
                     sms_provider=str(data.get("sms_provider", "manual") or "manual"),
                     max_flow_attempts=int(data.get("max_flow_attempts", 1) or 1),
                     max_authorize_attempts=int(data.get("max_authorize_attempts", 2) or 2),

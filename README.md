@@ -1,6 +1,6 @@
 # openai-paypal
 
-面向授权 CTF 环境的 PayPal Billing Agreement 协议流程工具。项目保留一个 `PayPalFlow`：Chromium 只负责动态页面、Cookie 与浏览器风控信号，OTP、Signup、Buyer Funding 和 authorize 使用 HTTP GraphQL。
+面向授权 CTF 环境的 PayPal Billing Agreement 协议流程工具。项目保留一个 `PayPalFlow`：标准路线可使用 Chromium 取得动态页面、Cookie 与浏览器风控信号；纯协议路线使用固定 iOS/CriOS 136 身份和 HTTP/1.1。OTP、Signup、Buyer Funding 和 authorize 使用 HTTP GraphQL。
 
 > 仅限已获授权、且 PayPal 域名已经劫持到 CTF 的环境。不要把它用于真实 PayPal、真实卡片或未授权账号。
 
@@ -92,6 +92,18 @@ curl http://127.0.0.1:8080/api/health
 ```
 
 手动任务会在 OTP 阶段暂停。此时输入 6 位验证码、同国新手机号，或输入 `q` 退出。
+
+Web 的“执行路线”有三种：
+
+| 路线 | 行为 |
+| --- | --- |
+| 标准完整流程 | 保留现有 Roxy、Headless、程序随机和自动模式选择；默认路线。 |
+| 纯协议到 Signup | 固定使用 iOS 18、CriOS 136、HTTP/1.1 与协议风控，只验证有效 `/checkoutweb/signup` 200，然后在发送 OTP 或注册请求前停止。必须填写 E.164 手机号，不使用 SMSBower。 |
+| 纯协议完整流程 | 使用同一固定协议 Profile 继续 OTP、Signup、Funding 和 authorize；不会创建 Roxy 窗口。 |
+
+两种纯协议路线由服务端强制使用 `random / protocol / python_generated / protocol` 和 `curl-chrome-http1`；不会被 `.env` 中的 Roxy 默认值或客户端提交的 runtime 字段覆盖。Web 表单中的 BA、手机号和当前任务代理仍然生效。
+
+纯协议到 Signup 成功时，任务结果包含 HTTP 状态、脱敏 signup URL、approval 结构诊断、`roxy_api_calls=0` 和 `stopped_before_signup_mutation=true`。如果 approval 没有形成有效应用或 signup 被 challenge，任务标为 failed，但保留脱敏分类结果供排查。
 
 ## Windows Docker Desktop
 
