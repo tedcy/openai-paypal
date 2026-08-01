@@ -1,0 +1,24 @@
+{
+  "round": 86,
+  "mode": "cold-protocol",
+  "control": "First zero-Roxy Phase 0/2 run after exact response-derived ModXO router-state reconstruction and shared curl-chrome-http1 support",
+  "ba_hash": "8ce81c2bfd0881b2",
+  "proxy_hash": "4755d05985821898",
+  "result": "CURL_RECV_RESET_BEFORE_HTTP_RESPONSE",
+  "phase": "approval_initial_get",
+  "http_status": 0,
+  "protocol_transport": "curl-chrome-http1",
+  "roxy_api_calls": 0,
+  "traffic_events": 2,
+  "response_events": 0,
+  "capture_root": "captures/signup-lab/20260801-cold-protocol-round-86",
+  "network_environment_inspected": false,
+  "proxy_rotation": "quarantine current proxy hash and retain the same BA",
+  "evidence": [
+    "PayPalSession accepted curl-chrome-http1 and began Phase 0 without constructing or calling Roxy",
+    "the first approval GET ended with curl error 35 Recv failure: Connection was reset before any HTTP response existed",
+    "the result contains no status, body, challenge marker, genericError, EC, SSRT or application-layer evidence and therefore does not classify the BA",
+    "the explicit connection-level failure permits rotating only the proxy SID under the fixed experiment rules"
+  ],
+  "conclusion": "Round 86 did not exercise the response-derived router state or any ModXO action. Retry the unchanged cold-protocol flow with the same BA and the next non-quarantined proxy."
+}
