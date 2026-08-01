@@ -1,6 +1,7 @@
 import inspect
 import json
 import threading
+import tomllib
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -66,6 +67,49 @@ def test_signup_lab_inputs_accept_utf8_bom(tmp_path) -> None:
     )
 
     assert SignupLabInputs.load(source).selection()[0] == "BA-12345678ABCDEF"
+
+
+def test_signup_lab_inputs_support_toml_and_persist_rotation(tmp_path) -> None:
+    source = tmp_path / "inputs.toml"
+    first = "proxy-a.test:3010:user:password-a"
+    second = "proxy-b.test:3010:user:password-b"
+    source.write_text(
+        "\n".join(
+            [
+                'ba_tokens = ["BA-12345678ABCDEF", "BA-87654321FEDCBA"]',
+                'phone = "+38761123456"',
+                f'proxies = ["{first}", "{second}"]',
+                "failed_proxy_hashes = []",
+                "next_ba_index = 1",
+                "next_proxy_index = 0",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = SignupLabInputs.load(source)
+    _, ba_token, selected_proxy, rotation = SignupLabInputs.reserve_for_profile(source)
+    first_hash, added = SignupLabInputs.quarantine_proxy(source, first)
+    persisted = tomllib.loads(source.read_text(encoding="utf-8"))
+
+    assert loaded.selection() == ("BA-87654321FEDCBA", first)
+    assert ba_token == "BA-87654321FEDCBA"
+    assert selected_proxy == first
+    assert rotation["next_proxy_index"] == 1
+    assert added is True
+    assert persisted["next_ba_index"] == 1
+    assert persisted["next_proxy_index"] == 1
+    assert persisted["failed_proxy_hashes"] == [first_hash]
+    assert persisted["proxies"] == [first, second]
+
+
+def test_signup_lab_inputs_reject_unknown_file_format(tmp_path) -> None:
+    source = tmp_path / "inputs.yaml"
+    source.write_text("ba_tokens: []\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match=".json or .toml"):
+        SignupLabInputs.load(source)
 
 
 def test_signup_lab_inputs_route_bosnia_phone_and_proxy(tmp_path) -> None:

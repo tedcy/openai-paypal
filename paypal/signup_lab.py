@@ -14,6 +14,7 @@ import queue
 import re
 import threading
 import time
+import tomllib
 import urllib.parse
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -283,7 +284,7 @@ class SignupLabInputs:
     @classmethod
     def load(cls, path: str | Path) -> "SignupLabInputs":
         source = Path(path).expanduser().resolve()
-        data = json.loads(source.read_text(encoding="utf-8-sig"))
+        data = cls._read_state(source)
         ba_values = data.get("ba_tokens") or data.get("ba_urls") or []
         tokens = [parse_ba_token(str(item)) for item in ba_values]
         phone = str(data.get("phone") or "").strip()
@@ -325,13 +326,64 @@ class SignupLabInputs:
         )
 
     @staticmethod
-    def _write_state(source: Path, data: Mapping[str, Any]) -> None:
+    def _read_state(source: Path) -> dict[str, Any]:
+        suffix = source.suffix.lower()
+        if suffix == ".json":
+            data = json.loads(source.read_text(encoding="utf-8-sig"))
+        elif suffix == ".toml":
+            with source.open("rb") as handle:
+                data = tomllib.load(handle)
+        else:
+            raise ValueError("signup lab input file must use .json or .toml")
+        if not isinstance(data, dict):
+            raise ValueError("signup lab input file must contain a top-level object/table")
+        return dict(data)
+
+    @staticmethod
+    def _toml_scalar(value: Any) -> str:
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        if isinstance(value, int):
+            return str(value)
+        if isinstance(value, float):
+            return repr(value)
+        if isinstance(value, str):
+            return json.dumps(value, ensure_ascii=False)
+        raise ValueError(f"unsupported signup lab TOML value type: {type(value).__name__}")
+
+    @classmethod
+    def _toml_state_text(cls, data: Mapping[str, Any]) -> str:
+        lines: list[str] = []
+        for raw_key, value in data.items():
+            key = str(raw_key)
+            if not re.fullmatch(r"[A-Za-z0-9_-]+", key):
+                raise ValueError(f"unsupported signup lab TOML key: {key}")
+            if isinstance(value, list):
+                if not value:
+                    lines.append(f"{key} = []")
+                else:
+                    lines.append(f"{key} = [")
+                    lines.extend(f"  {cls._toml_scalar(item)}," for item in value)
+                    lines.append("]")
+            else:
+                lines.append(f"{key} = {cls._toml_scalar(value)}")
+            lines.append("")
+        return "\n".join(lines).rstrip() + "\n"
+
+    @classmethod
+    def _write_state(cls, source: Path, data: Mapping[str, Any]) -> None:
         temporary = source.with_name(
             f".{source.name}.{os.getpid()}.{time.time_ns()}.tmp"
         )
         try:
+            if source.suffix.lower() == ".toml":
+                rendered = cls._toml_state_text(data)
+            elif source.suffix.lower() == ".json":
+                rendered = json.dumps(data, ensure_ascii=False, indent=2) + "\n"
+            else:
+                raise ValueError("signup lab input file must use .json or .toml")
             temporary.write_text(
-                json.dumps(data, ensure_ascii=False, indent=2) + "\n",
+                rendered,
                 encoding="utf-8",
             )
             os.replace(temporary, source)
@@ -351,7 +403,7 @@ class SignupLabInputs:
             ba_token = inputs.ba_tokens[inputs.next_ba_index % len(inputs.ba_tokens)]
             proxy_line = inputs.proxies[proxy_index]
             next_proxy_index = (proxy_index + 1) % len(inputs.proxies)
-            data = json.loads(source.read_text(encoding="utf-8-sig"))
+            data = cls._read_state(source)
             data["next_proxy_index"] = next_proxy_index
             cls._write_state(source, data)
         return inputs, ba_token, proxy_line, {
@@ -366,7 +418,7 @@ class SignupLabInputs:
         source = Path(path).expanduser().resolve()
         proxy_hash = _hash(ProxyEntry.parse(proxy_line).url)
         with _SIGNUP_LAB_INPUT_LOCK:
-            data = json.loads(source.read_text(encoding="utf-8-sig"))
+            data = cls._read_state(source)
             failed = {
                 str(value).strip().lower()
                 for value in data.get("failed_proxy_hashes", [])

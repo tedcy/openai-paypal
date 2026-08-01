@@ -89,7 +89,7 @@ def main():
     parser.add_argument(
         "--lab-input-file",
         default="var/signup-lab/inputs.json",
-        help="Git-ignored JSON containing BA, phone and proxy pools",
+        help="Git-ignored JSON or TOML containing BA, phone and proxy pools",
     )
     parser.add_argument(
         "--capture-dir",
