@@ -447,7 +447,21 @@ class TrafficRecorder:
         if not data:
             return None
         ext = _extension_for(content_type, url)
-        path = directory / f"{prefix}_{_safe_name(url)}_{_sha256(data)[:10]}{ext}"
+        parts = urllib.parse.urlsplit(url or "")
+        route_label = _safe_name(
+            f"{parts.netloc}{parts.path}",
+            max_len=32,
+        )
+        safe_prefix = _safe_name(prefix, max_len=24)
+        url_hash = _sha256((url or "").encode("utf-8"))[:12]
+        body_hash = _sha256(data)[:10]
+        filename = f"{safe_prefix}_{route_label}_{url_hash}_{body_hash}{ext}"
+        path = directory / filename
+        # Keep enough headroom for the default Windows MAX_PATH behavior.
+        # The complete URL remains in events.jsonl; filenames need only a
+        # readable route label and deterministic hashes.
+        if os.name == "nt" and len(str(path)) >= 240:
+            path = directory / f"{safe_prefix}_{url_hash}_{body_hash}{ext}"
         _prepare_private_dir(directory)
         path.write_bytes(data)
         try:

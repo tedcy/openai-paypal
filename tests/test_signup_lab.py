@@ -890,6 +890,39 @@ def test_lab_raw_recorder_is_explicit_and_preserves_request(tmp_path) -> None:
     assert "session=raw-cookie" in persisted
 
 
+def test_lab_raw_recorder_bounds_artifact_names_for_long_query_urls(tmp_path) -> None:
+    recorder = TrafficRecorder(tmp_path / "protocol", lab_raw=True)
+    raw_token = "BA-1234567890ABCDEF"
+    long_url = (
+        "https://www.paypal.com/pay?ssrt=1234567890"
+        f"&token={raw_token}&ul=1&ctxId=" + ("x" * 180)
+        + "&paypal_client_cfci=modxo_vaulted_not_recurring-Pay_With_Card"
+    )
+    request_id = recorder.record_request(
+        "POST",
+        long_url,
+        {"data": {"formName": "createAccountAction"}},
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    recorder.record_response(
+        request_id,
+        "POST",
+        long_url,
+        httpx.Response(200, text="server action response"),
+    )
+    recorder.close()
+
+    artifacts = [
+        *recorder.requests_dir.iterdir(),
+        *recorder.bodies_dir.iterdir(),
+    ]
+    assert len(artifacts) == 2
+    assert all(len(path.name) < 96 for path in artifacts)
+    assert all(raw_token not in path.name for path in artifacts)
+    assert all(path.is_file() for path in artifacts)
+    assert raw_token in recorder.events_file.read_text(encoding="utf-8")
+
+
 def test_compare_aligns_by_stage_method_and_path(tmp_path) -> None:
     protocol = tmp_path / "protocol" / "network"
     browser = tmp_path / "browser" / "network"
