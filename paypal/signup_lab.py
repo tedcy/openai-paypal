@@ -26,6 +26,7 @@ from loguru import logger
 
 from config import BROWSER_PROFILE
 from paypal.country import browser_profile_for, parse_ba_token, profile_for_phone
+from paypal.models import SessionState
 from paypal.proxy import ProxyEntry
 from paypal.roxy_fingerprint import (
     RoxyApiClient,
@@ -478,6 +479,7 @@ class BrowserSignupContext:
     protocol_response_status: int = 0
     protocol_cookie_source: str = "captured-header"
     protocol_header_source: str = "captured"
+    protocol_url_source: str = "captured"
     paused_request_resolution: str = ""
     handoff_error_stage: str = ""
 
@@ -699,6 +701,7 @@ class RoxySignupLab:
         protocol_transport: str = "httpx",
         handoff_cookie_source: str = "captured-header",
         handoff_header_source: str = "captured",
+        handoff_url_source: str = "captured",
         keep_profile: bool = False,
         window_hold_seconds: float = 0.0,
         warmup: bool = False,
@@ -725,6 +728,10 @@ class RoxySignupLab:
             raise ValueError(
                 f"unsupported signup lab handoff header source: {handoff_header_source}"
             )
+        if handoff_url_source not in {"captured", "session-state"}:
+            raise ValueError(
+                f"unsupported signup lab handoff URL source: {handoff_url_source}"
+            )
         self.mode = mode
         self.ba_token = parse_ba_token(ba_token)
         self.phone = phone
@@ -734,6 +741,7 @@ class RoxySignupLab:
         self.protocol_transport = protocol_transport
         self.handoff_cookie_source = handoff_cookie_source
         self.handoff_header_source = handoff_header_source
+        self.handoff_url_source = handoff_url_source
         self.keep_profile = keep_profile
         requested_hold = max(0.0, min(float(window_hold_seconds), 3600.0))
         self.window_hold_seconds = (
@@ -1163,6 +1171,42 @@ class RoxySignupLab:
             (query.get("ctxId") or [""])[0],
         )
 
+    def _session_state_handoff_target(self, paused_url: str) -> tuple[str, str]:
+        """Rebuild signup and Pay URLs from the current in-memory session state."""
+        state = SessionState(ba_token=self.ba_token)
+        state.ec_token, state.ssrt, state.ctx_id = self._extract_context(
+            paused_url,
+            "",
+        )
+        if not state.ec_token.startswith("EC-"):
+            raise RuntimeError("ROXY_EC_TOKEN_MISSING")
+        if not state.ssrt:
+            raise RuntimeError("ROXY_SSRT_MISSING")
+
+        signup_locale = self.country_profile.language.replace("-", "_")
+        signup_query = [
+            ("ssrt", state.ssrt),
+            ("ul", "1"),
+            ("modxo_redirect_reason", "guest_user"),
+            ("locale.x", signup_locale),
+            ("country.x", self.country_profile.country),
+            ("ba_token", state.ba_token),
+            ("token", state.ec_token),
+            ("rcache", "1"),
+        ]
+        state.signup_url = (
+            "https://www.paypal.com/checkoutweb/signup?"
+            + urllib.parse.urlencode(signup_query)
+        )
+        referer = "https://www.paypal.com/pay?" + urllib.parse.urlencode(
+            [
+                ("ssrt", state.ssrt),
+                ("token", state.ba_token),
+                ("ul", "1"),
+            ]
+        )
+        return state.signup_url, referer
+
     @staticmethod
     def _handoff_headers(
         paused: Mapping[str, Any],
@@ -1259,6 +1303,12 @@ class RoxySignupLab:
             cookie_source=self.handoff_cookie_source,
             header_source=self.handoff_header_source,
         )
+        if self.handoff_url_source == "session-state":
+            url, referer = self._session_state_handoff_target(url)
+            for key in tuple(headers):
+                if key.lower() == "referer":
+                    headers.pop(key, None)
+            headers["Referer"] = referer
         output.mkdir(parents=True, exist_ok=True)
         _write_json(
             output / "request.json",
@@ -1268,6 +1318,7 @@ class RoxySignupLab:
                 "headers": headers,
                 "cookie_source": self.handoff_cookie_source,
                 "header_source": self.handoff_header_source,
+                "url_source": self.handoff_url_source,
                 "cookie_snapshot_count": len(cookies),
             },
         )
@@ -1314,6 +1365,7 @@ class RoxySignupLab:
             "transport": self.protocol_transport,
             "cookie_source": self.handoff_cookie_source,
             "header_source": self.handoff_header_source,
+            "url_source": self.handoff_url_source,
             "url": url,
             "status": int(response.status_code),
             "headers": response_headers,
@@ -1345,6 +1397,7 @@ class RoxySignupLab:
         context.protocol_request_started = True
         context.protocol_cookie_source = self.handoff_cookie_source
         context.protocol_header_source = self.handoff_header_source
+        context.protocol_url_source = self.handoff_url_source
         context.stages.append(
             {
                 "time": _utc_now(),
@@ -1436,6 +1489,7 @@ class RoxySignupLab:
             manual_navigation=self.manual_navigation,
             protocol_cookie_source=self.handoff_cookie_source,
             protocol_header_source=self.handoff_header_source,
+            protocol_url_source=self.handoff_url_source,
         )
         if not existing_control:
             context_result.browser_create_args = _roxy_profile_startup_args(
@@ -1712,6 +1766,7 @@ class RoxySignupLab:
                 "protocol_response_status": context_result.protocol_response_status,
                 "protocol_cookie_source": context_result.protocol_cookie_source,
                 "protocol_header_source": context_result.protocol_header_source,
+                "protocol_url_source": context_result.protocol_url_source,
                 "paused_request_resolution": context_result.paused_request_resolution,
                 "handoff_error_stage": context_result.handoff_error_stage,
             },
@@ -2401,6 +2456,7 @@ def run_signup_lab_from_file(
     protocol_transport: str = "httpx",
     handoff_cookie_source: str = "captured-header",
     handoff_header_source: str = "captured",
+    handoff_url_source: str = "captured",
     keep_profile: bool = False,
     window_hold_seconds: float = 0.0,
     warmup: bool = False,
@@ -2462,6 +2518,7 @@ def run_signup_lab_from_file(
             protocol_transport=protocol_transport,
             handoff_cookie_source=handoff_cookie_source,
             handoff_header_source=handoff_header_source,
+            handoff_url_source=handoff_url_source,
             keep_profile=keep_profile,
             window_hold_seconds=window_hold_seconds,
             warmup=warmup,

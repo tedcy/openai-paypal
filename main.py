@@ -87,6 +87,15 @@ def main():
         ),
     )
     parser.add_argument(
+        "--handoff-url-source",
+        choices=["captured", "session-state"],
+        default="captured",
+        help=(
+            "Signup handoff URL and Referer source: preserve the paused browser "
+            "values, or rebuild them from the current SessionState"
+        ),
+    )
+    parser.add_argument(
         "--lab-input-file",
         default="var/signup-lab/inputs-ba.toml",
         help="Git-ignored JSON or TOML containing BA, phone and proxy pools",
@@ -276,6 +285,7 @@ def main():
             protocol_transport=args.protocol_transport,
             handoff_cookie_source=args.handoff_cookie_source,
             handoff_header_source=args.handoff_header_source,
+            handoff_url_source=args.handoff_url_source,
             keep_profile=args.keep_roxy_profile,
             window_hold_seconds=args.roxy_window_hold_seconds,
             warmup=args.signup_lab_warmup,

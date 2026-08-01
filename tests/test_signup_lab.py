@@ -329,11 +329,86 @@ def test_signup_lab_accepts_explicit_handoff_header_sources(
     assert lab.handoff_header_source == header_source
 
 
+@pytest.mark.parametrize("url_source", ["captured", "session-state"])
+def test_signup_lab_accepts_explicit_handoff_url_sources(
+    tmp_path, url_source: str
+) -> None:
+    lab = RoxySignupLab(
+        mode="handoff",
+        ba_token="BA-12345678ABCDEF",
+        phone="+38761123456",
+        proxy_line="proxy.test:3010:user:password",
+        capture_root=tmp_path / url_source,
+        handoff_url_source=url_source,
+    )
+
+    assert lab.handoff_url_source == url_source
+
+
+def test_session_state_handoff_rebuilds_bosnia_signup_url_and_referer(
+    tmp_path,
+) -> None:
+    lab = RoxySignupLab(
+        mode="handoff",
+        ba_token="BA-12345678ABCDEF",
+        phone="+38761123456",
+        proxy_line="proxy.test:3010:user:password",
+        capture_root=tmp_path / "session-state",
+        handoff_url_source="session-state",
+    )
+
+    signup_url, referer = lab._session_state_handoff_target(
+        "https://www.paypal.com/checkoutweb/signup"
+        "?ssrt=1785555248159&locale.x=wrong&country.x=US"
+        "&ba_token=BA-CAPTURED123456&token=EC-6T5956334X260411R"
+    )
+
+    assert signup_url == (
+        "https://www.paypal.com/checkoutweb/signup"
+        "?ssrt=1785555248159&ul=1&modxo_redirect_reason=guest_user"
+        "&locale.x=en_BA&country.x=BA&ba_token=BA-12345678ABCDEF"
+        "&token=EC-6T5956334X260411R&rcache=1"
+    )
+    assert referer == (
+        "https://www.paypal.com/pay"
+        "?ssrt=1785555248159&token=BA-12345678ABCDEF&ul=1"
+    )
+
+
+def test_session_state_handoff_requires_ec_and_ssrt(tmp_path) -> None:
+    lab = RoxySignupLab(
+        mode="handoff",
+        ba_token="BA-12345678ABCDEF",
+        phone="+38761123456",
+        proxy_line="proxy.test:3010:user:password",
+        capture_root=tmp_path / "missing-state",
+        handoff_url_source="session-state",
+    )
+
+    with pytest.raises(RuntimeError, match="ROXY_EC_TOKEN_MISSING"):
+        lab._session_state_handoff_target(
+            "https://www.paypal.com/checkoutweb/signup?ssrt=1785555248159"
+        )
+    with pytest.raises(RuntimeError, match="ROXY_SSRT_MISSING"):
+        lab._session_state_handoff_target(
+            "https://www.paypal.com/checkoutweb/signup?token=EC-12345678"
+        )
+
+
 def test_requested_handoff_sources_are_recorded_before_navigation() -> None:
     source = inspect.getsource(RoxySignupLab.run)
 
     assert "protocol_cookie_source=self.handoff_cookie_source" in source
     assert "protocol_header_source=self.handoff_header_source" in source
+    assert "protocol_url_source=self.handoff_url_source" in source
+
+
+def test_cli_exposes_session_state_handoff_url_source() -> None:
+    source = (Path(__file__).parents[1] / "main.py").read_text(encoding="utf-8")
+
+    assert '"--handoff-url-source"' in source
+    assert 'choices=["captured", "session-state"]' in source
+    assert "handoff_url_source=args.handoff_url_source" in source
 
 
 def test_paused_handoff_runs_protocol_before_resolution_without_page_access(
