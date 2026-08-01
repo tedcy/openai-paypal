@@ -119,6 +119,45 @@ def _hash(value: object) -> str:
     return hashlib.sha256(raw).hexdigest()[:16]
 
 
+def _cold_protocol_ios136_profile(country_profile: Any) -> dict[str, object]:
+    """Build the browser identity used by the successful headed baseline.
+
+    The rest of the synthetic device material is generated once per protocol
+    session, but the browser family/version, mobile platform and viewport stay
+    internally coherent and User-Agent Client Hints remain disabled as they
+    are in Chromium on iOS.
+    """
+    return browser_profile_for(
+        country_profile,
+        {
+            **BROWSER_PROFILE,
+            "user_agent": _IOS_CRIOS_136_USER_AGENT,
+            "chrome_major": 136,
+            "chrome_full_version": "136.0.7103.60",
+            "platform": "iPhone",
+            "sec_ch_platform": "",
+            "ua_client_hints_enabled": False,
+            "preserve_browser_identity": True,
+            "mobile": True,
+            "hardware_concurrency": 12,
+            "device_pixel_ratio": 3,
+            "gpu_vendor": "Apple Inc.",
+            "gpu_renderer": "Apple GPU",
+            "webgl_vendor": "Apple Inc.",
+            "webgl_renderer": "Apple GPU",
+            "screen": {
+                "width": 480,
+                "height": 854,
+                "availWidth": 480,
+                "availHeight": 854,
+                "colorDepth": 24,
+                "pixelDepth": 24,
+            },
+            "viewport": {"width": 480, "height": 754},
+        },
+    )
+
+
 def _write_json(path: Path, value: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -2598,6 +2637,7 @@ def run_cold_protocol_signup(
 
     root = Path(capture_root).expanduser().resolve()
     profile = profile_for_phone(phone)
+    protocol_browser_profile = _cold_protocol_ios136_profile(profile)
     proxy = ProxyEntry.parse(proxy_line)
     recorder = TrafficRecorder(root / "protocol", lab_raw=True)
     set_current_traffic_recorder(recorder)
@@ -2614,6 +2654,8 @@ def run_cold_protocol_signup(
             risk_signals_mode="protocol",
             country_profile=profile,
             protocol_transport=protocol_transport,
+            browser_profile_seed=protocol_browser_profile,
+            protocol_impersonate="chrome136",
         )
         result = flow.run_until_signup()
     finally:

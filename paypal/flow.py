@@ -18,7 +18,7 @@ import urllib.parse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Protocol, cast
+from typing import Any, Mapping, Protocol, cast
 from uuid import uuid4
 from loguru import logger
 
@@ -209,6 +209,8 @@ class PayPalFlow:
         sms_provider: SmsOtpProviderProtocol | None = None,
         country_profile: CountryProfile | None = None,
         protocol_transport: str | None = None,
+        browser_profile_seed: Mapping[str, object] | None = None,
+        protocol_impersonate: str | None = None,
     ):
         self.ba_token = parse_ba_token(ba_token)
         self.user = user
@@ -239,11 +241,16 @@ class PayPalFlow:
         self.risk_signals_mode = risk_signals_mode
         self.sms_provider = sms_provider
         self.protocol_transport = protocol_transport
+        self.browser_profile_seed = dict(browser_profile_seed or {})
+        self.protocol_impersonate = protocol_impersonate
         self._requested_risk_signals_mode = self._risk_signals_mode_raw()
         self._roxy_runtime_disabled_reason = ""
         keep_roxy_browser = self._roxy_runtime_requested()
         self.state = SessionState(ba_token=self.ba_token)
-        regional_profile = browser_profile_for(self.country_profile, BROWSER_PROFILE)
+        regional_profile = browser_profile_for(
+            self.country_profile,
+            self.browser_profile_seed or BROWSER_PROFILE,
+        )
         ensure_runtime_profile(
             self.state,
             source=self.fingerprint_source,
@@ -262,6 +269,7 @@ class PayPalFlow:
             proxy_url=self.proxy_config.url,
             proxy_label=self.proxy_config.label,
             transport=self.protocol_transport,
+            curl_impersonate=self.protocol_impersonate,
         )
         self.captcha_bypass_mode = paypal_captcha_bypass_mode()
         self._used_partial_signup_token = False
@@ -2478,7 +2486,10 @@ class PayPalFlow:
         self.card = generate_card(proxy_url=self.proxy_config.url)
         self.address = current_address
         self.state = SessionState(ba_token=self.ba_token)
-        regional_profile = browser_profile_for(self.country_profile, BROWSER_PROFILE)
+        regional_profile = browser_profile_for(
+            self.country_profile,
+            self.browser_profile_seed or BROWSER_PROFILE,
+        )
         ensure_runtime_profile(
             self.state,
             source=self.fingerprint_source,
@@ -2495,6 +2506,7 @@ class PayPalFlow:
             proxy_url=self.proxy_config.url,
             proxy_label=self.proxy_config.label,
             transport=self.protocol_transport,
+            curl_impersonate=self.protocol_impersonate,
         )
         self.captcha_bypass_mode = paypal_captcha_bypass_mode()
         self._used_partial_signup_token = False

@@ -362,7 +362,9 @@ def _font_stack_for_profile(profile: Mapping[str, Any]) -> list[str]:
     platform = str(profile.get("platform") or "").lower()
     if "win" in platform:
         return list(_WINDOWS_FONT_STACK)
-    if "mac" in platform:
+    if "mac" in platform or any(
+        marker in platform for marker in ("iphone", "ipad", "ipod", "ios")
+    ):
         return list(_MAC_FONT_STACK)
     return list(_LINUX_FONT_STACK)
 
@@ -619,7 +621,15 @@ def _generate_synthetic_runtime_profile(
     configured_profile: JsonDict = dict(BROWSER_PROFILE)
     if seed_browser_profile:
         configured_profile.update(seed_browser_profile)
-    if randomize:
+    preserve_browser_identity = _bool_or(
+        configured_profile.get("preserve_browser_identity"),
+        False,
+    )
+    mobile_runtime = _bool_or(configured_profile.get("mobile"), False) or any(
+        marker in str(configured_profile.get("platform") or "").lower()
+        for marker in ("iphone", "ipad", "ipod", "ios")
+    )
+    if randomize and not preserve_browser_identity:
         chrome_full_version = _random_chrome_full_version()
         chrome_major = _chrome_major_from_version(chrome_full_version)
     else:
@@ -628,7 +638,39 @@ def _generate_synthetic_runtime_profile(
             configured_profile.get("chrome_full_version")
             or f"{chrome_major}.0.0.0"
         )
-    if randomize:
+    if randomize and mobile_runtime:
+        screen = dict(
+            cast(
+                Mapping[str, object],
+                configured_profile.get("screen")
+                or {
+                    "width": 480,
+                    "height": 854,
+                    "availWidth": 480,
+                    "availHeight": 854,
+                    "colorDepth": 24,
+                    "pixelDepth": 24,
+                },
+            )
+        )
+        viewport = dict(
+            cast(
+                Mapping[str, object],
+                configured_profile.get("viewport")
+                or {"width": 480, "height": 754},
+            )
+        )
+        gpu = {
+            "gpu_vendor": configured_profile.get("gpu_vendor"),
+            "gpu_renderer": configured_profile.get("gpu_renderer"),
+            "webgl_vendor": configured_profile.get("webgl_vendor"),
+            "webgl_renderer": configured_profile.get("webgl_renderer"),
+        }
+        hardware_concurrency = int(configured_profile.get("hardware_concurrency") or 12)
+        device_pixel_ratio = configured_profile.get("device_pixel_ratio", 3)
+        connection_rtt = str(random.choice([100, 125, 150, 175, 200]))
+        connection_downlink = str(random.choice([8, 10, 12, 15]))
+    elif randomize:
         screen = _random_mainstream_screen()
         screen.update({"colorDepth": 24, "pixelDepth": 24})
         screen_width = cast(int, screen["width"])

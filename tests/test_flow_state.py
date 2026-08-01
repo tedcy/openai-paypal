@@ -7,7 +7,7 @@ import pytest
 from paypal.country import profile_for_country
 from paypal.flow import PayPalFlow
 from paypal.models import SessionState, generate_address, generate_card, generate_user
-from paypal.session import CurlHttpVersion, PayPalSession
+from paypal.session import CurlHttpVersion, PayPalSession, build_common_headers, build_high_entropy_hints
 
 
 def _bare_flow(country: str) -> PayPalFlow:
@@ -183,6 +183,54 @@ def test_shared_paypal_session_supports_curl_chrome_http1() -> None:
         assert session._use_curl is True
         assert session._curl_http1 is True
         assert prepared["http_version"] == CurlHttpVersion.V1_1
+    finally:
+        session.close()
+
+
+def test_ios_crios_profile_omits_user_agent_client_hints() -> None:
+    state = SessionState(ba_token="BA-12345678ABCDEFG")
+    state.browser_profile = {
+        "user_agent": (
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) "
+            "AppleWebKit/605.1.15 (KHTML, like Gecko) "
+            "CriOS/136.0.7103.60 Mobile/15E148 Safari/537.36"
+        ),
+        "platform": "iPhone",
+        "language": "en-BA",
+        "ua_client_hints_enabled": False,
+        "mobile": True,
+    }
+
+    headers = build_common_headers(state)
+
+    assert headers["User-Agent"].find("CriOS/136.") > 0
+    assert headers["Accept-Language"] == "en-BA,en;q=0.9,en-US;q=0.8"
+    assert not any(name.lower().startswith("sec-ch-") for name in headers)
+    assert build_high_entropy_hints(state) == {}
+
+
+def test_shared_paypal_session_accepts_explicit_chrome136_impersonation() -> None:
+    if CurlHttpVersion is None:
+        pytest.skip("curl_cffi is not installed")
+    state = SessionState(ba_token="BA-12345678ABCDEFG")
+    state.browser_profile = {
+        "user_agent": "Mozilla/5.0 CriOS/136.0.7103.60 Mobile/15E148",
+        "platform": "iPhone",
+        "language": "en-BA",
+        "ua_client_hints_enabled": False,
+    }
+    session = PayPalSession(
+        state,
+        transport="curl-chrome-http1",
+        curl_impersonate="chrome136",
+    )
+    try:
+        assert session._curl_impersonate == "chrome136"
+        assert session._curl_default_headers is False
+        assert not any(
+            str(name).lower().startswith("sec-ch-")
+            for name in session.client.headers
+        )
     finally:
         session.close()
 

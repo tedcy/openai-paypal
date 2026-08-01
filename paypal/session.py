@@ -134,6 +134,20 @@ def _format_sec_ch_ua(entries: list[dict[str, str]]) -> str:
     return ", ".join(f'"{item["brand"]}";v="{item["version"]}"' for item in entries)
 
 
+def _ua_client_hints_enabled(profile: dict[str, Any]) -> bool:
+    explicit = profile.get("ua_client_hints_enabled")
+    if explicit is not None:
+        if isinstance(explicit, str):
+            return explicit.strip().lower() not in {"0", "false", "no", "off"}
+        return bool(explicit)
+    user_agent = str(profile.get("user_agent") or "")
+    platform = str(profile.get("platform") or "").lower()
+    # Chromium on iOS uses WebKit and does not expose User-Agent Client Hints.
+    return "CriOS/" not in user_agent and not any(
+        marker in platform for marker in ("iphone", "ipad", "ipod", "ios")
+    )
+
+
 def _load_dotenv_value(name: str) -> str:
     """Read one value from local .env without adding a runtime dependency."""
     if os.getenv(name):
@@ -233,14 +247,20 @@ def build_common_headers(state: SessionState | None = None) -> dict[str, str]:
     ) or BROWSER_PROFILE)
     user_agent = str(profile.get("user_agent") or USER_AGENT)
     language = str(profile.get("language") or BROWSER_PROFILE.get("language") or "en-US")
-    return {
+    headers = {
         "User-Agent": user_agent,
         "Accept": "*/*",
         "Accept-Language": accept_language_value(language),
-        "sec-ch-ua": _format_sec_ch_ua(_low_entropy_ua_brands(profile)),
-        "sec-ch-ua-mobile": "?0",
-        "sec-ch-ua-platform": str(profile.get("sec_ch_platform") or '"Linux"'),
     }
+    if _ua_client_hints_enabled(profile):
+        headers.update(
+            {
+                "sec-ch-ua": _format_sec_ch_ua(_low_entropy_ua_brands(profile)),
+                "sec-ch-ua-mobile": "?1" if profile.get("mobile") else "?0",
+                "sec-ch-ua-platform": str(profile.get("sec_ch_platform") or '"Linux"'),
+            }
+        )
+    return headers
 
 
 def build_high_entropy_hints(state: SessionState | None = None) -> dict[str, str]:
@@ -250,6 +270,8 @@ def build_high_entropy_hints(state: SessionState | None = None) -> dict[str, str
         if state is not None
         else None
     ) or BROWSER_PROFILE)
+    if not _ua_client_hints_enabled(cast(dict[str, Any], profile)):
+        return {}
     return {
         "sec-ch-ua-arch": str(profile.get("sec_ch_arch") or '"x86"'),
         "sec-ch-device-memory": str(profile.get("device_memory") or "8"),
@@ -581,6 +603,7 @@ class PayPalSession:
         proxy_url: str | None = None,
         proxy_label: str = "",
         transport: str | None = None,
+        curl_impersonate: str | None = None,
     ):
         self.state = state
         self.proxy_url = proxy_url
@@ -622,17 +645,33 @@ class PayPalSession:
         if proxy_url:
             client_kwargs["proxy"] = proxy_url
         if self._use_curl:
-            impersonate = os.getenv("PAYPAL_CURL_IMPERSONATE", "chrome").strip() or "chrome"
+            impersonate = (
+                (curl_impersonate or "").strip()
+                or os.getenv("PAYPAL_CURL_IMPERSONATE", "chrome").strip()
+                or "chrome"
+            )
+            curl_default_headers = _ua_client_hints_enabled(
+                cast(dict[str, Any], self.state.browser_profile or {})
+            )
+            self._curl_impersonate = impersonate
+            self._curl_default_headers = curl_default_headers
             curl_session_factory = cast(Any, globals().get("CurlSession"))
             if curl_session_factory is None:
                 raise RuntimeError("curl_cffi is not available")
-            self.client = curl_session_factory(impersonate=impersonate)
+            self.client = curl_session_factory(
+                impersonate=impersonate,
+                default_headers=curl_default_headers,
+            )
             self.client.headers.update(build_common_headers(state))
             self.client.timeout = 30
             self.client.allow_redirects = False
             if proxy_url:
                 self.client.proxies = {"https": proxy_url, "http": proxy_url}
-            logger.info("HTTP client: curl_cffi ({})", impersonate)
+            logger.info(
+                "HTTP client: curl_cffi ({}, default_headers={})",
+                impersonate,
+                curl_default_headers,
+            )
         else:
             self.client = httpx.Client(**client_kwargs)
             logger.info("HTTP client: httpx (http2={})", client_kwargs.get("http2"))

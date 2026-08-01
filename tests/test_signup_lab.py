@@ -19,6 +19,7 @@ from paypal.signup_lab import (
     _approval_document_has_status,
     _configure_roxy_for_randomized_ios,
     _configure_roxy_for_signup_lab,
+    _cold_protocol_ios136_profile,
     _create_dedicated_control_page,
     _hash,
     _safe_existing_profile_detail,
@@ -30,6 +31,8 @@ from paypal.signup_lab import (
     run_approval_control_from_file,
     run_signup_lab_from_file,
 )
+from paypal.country import profile_for_country
+from paypal.fingerprint import generate_runtime_profile
 from paypal.proxy import ProxyEntry
 from paypal.traffic_recorder import TrafficRecorder
 from tools.compare_paypal_traffic import compare
@@ -39,6 +42,26 @@ def test_signup_lab_cli_defaults_to_toml_input_state() -> None:
     source = (Path(__file__).parents[1] / "main.py").read_text(encoding="utf-8")
 
     assert 'default="var/signup-lab/inputs-ba.toml"' in source
+
+
+def test_cold_protocol_ios136_profile_preserves_mobile_identity(monkeypatch) -> None:
+    monkeypatch.setenv("PAYPAL_RANDOMIZE_BROWSER_PROFILE", "1")
+    seed = _cold_protocol_ios136_profile(profile_for_country("BA"))
+
+    runtime = generate_runtime_profile("random", browser_profile=seed)
+    profile = runtime["browser_profile"]
+
+    assert profile["chrome_major"] == 136
+    assert profile["chrome_full_version"] == "136.0.7103.60"
+    assert "CriOS/136.0.7103.60" in profile["user_agent"]
+    assert profile["platform"] == "iPhone"
+    assert profile["ua_client_hints_enabled"] is False
+    assert profile["country"] == "BA"
+    assert profile["language"] == "en-BA"
+    assert profile["timezone"] == "Europe/Sarajevo"
+    assert runtime["screen"]["width"] == 480
+    assert runtime["screen"]["height"] == 854
+    assert runtime["viewport"] == {"width": 480, "height": 754}
 
 
 def test_signup_lab_inputs_select_without_network(tmp_path) -> None:
