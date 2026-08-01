@@ -677,7 +677,8 @@ def test_signup_navigation_uses_locale_independent_create_account_control() -> N
     )
     assert 'form[data-testid="create-account-form"]' in source
     assert 'button[type="submit"]' in source
-    assert source.count("no_wait_after=True") >= 2
+    assert '"element => element.click()"' in source
+    assert source.count("no_wait_after=True") >= 1
     assert "english-text-fallback" in source
 
 
@@ -1357,6 +1358,7 @@ def test_pay_stage_uses_exact_application_email_form() -> None:
     assert 'form[data-testid=\"emailForm\"]' in pay_block
     assert 'button[data-testid=\"continueButton\"]' in pay_block
     assert "pay_form_submitted = True" in pay_block
+    assert 'selected_by = "create-account-form-dom-click"' in pay_block
     assert "#loginButton" not in pay_block
     assert "pay_create_account_view_selected" in pay_block
 

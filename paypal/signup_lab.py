@@ -977,11 +977,15 @@ class RoxySignupLab:
                             create_account_button.count()
                             and create_account_button.first.is_visible()
                         ):
-                            create_account_button.first.click(
-                                timeout=5000,
-                                no_wait_after=True,
+                            # The control is already known to be visible. Using
+                            # Playwright's actionability click can still spend
+                            # five seconds waiting on the animated Pay shell.
+                            # A DOM click emits the form's page-owned action
+                            # immediately and is marked complete exactly once.
+                            create_account_button.first.evaluate(
+                                "element => element.click()"
                             )
-                            selected_by = "create-account-form"
+                            selected_by = "create-account-form-dom-click"
                     except Exception as exc:
                         context.stages.append(
                             {
