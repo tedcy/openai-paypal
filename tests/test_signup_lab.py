@@ -35,6 +35,12 @@ from paypal.traffic_recorder import TrafficRecorder
 from tools.compare_paypal_traffic import compare
 
 
+def test_signup_lab_cli_defaults_to_toml_input_state() -> None:
+    source = (Path(__file__).parents[1] / "main.py").read_text(encoding="utf-8")
+
+    assert 'default="var/signup-lab/inputs-ba.toml"' in source
+
+
 def test_signup_lab_inputs_select_without_network(tmp_path) -> None:
     source = tmp_path / "inputs.json"
     source.write_text(

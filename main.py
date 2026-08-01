@@ -88,7 +88,7 @@ def main():
     )
     parser.add_argument(
         "--lab-input-file",
-        default="var/signup-lab/inputs.json",
+        default="var/signup-lab/inputs-ba.toml",
         help="Git-ignored JSON or TOML containing BA, phone and proxy pools",
     )
     parser.add_argument(
