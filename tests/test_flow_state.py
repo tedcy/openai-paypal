@@ -7,6 +7,7 @@ import pytest
 from paypal.country import profile_for_country
 from paypal.flow import PayPalFlow
 from paypal.models import SessionState, generate_address, generate_card, generate_user
+from paypal.session import CurlHttpVersion, PayPalSession
 
 
 def _bare_flow(country: str) -> PayPalFlow:
@@ -116,6 +117,22 @@ def test_modxo_router_state_rejects_incomplete_flight_fragment() -> None:
         '\\"authFlow\\":[\\"(__SLOT__)\\",{}]}'
     ) is False
     assert flow.state.modxo_router_slot_names == []
+
+
+def test_shared_paypal_session_supports_curl_chrome_http1() -> None:
+    if CurlHttpVersion is None:
+        pytest.skip("curl_cffi is not installed")
+    session = PayPalSession(
+        SessionState(ba_token="BA-12345678ABCDEFG"),
+        transport="curl-chrome-http1",
+    )
+    try:
+        prepared = session._prepare_curl_kwargs({})
+        assert session._use_curl is True
+        assert session._curl_http1 is True
+        assert prepared["http_version"] == CurlHttpVersion.V1_1
+    finally:
+        session.close()
 
 
 def test_partial_signup_token_commits_and_prevents_second_signup() -> None:

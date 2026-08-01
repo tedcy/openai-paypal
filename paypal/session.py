@@ -9,10 +9,11 @@ import urllib.parse
 import httpx
 
 try:
-    from curl_cffi import CurlMime  # pyright: ignore[reportMissingImports]
+    from curl_cffi import CurlHttpVersion, CurlMime  # pyright: ignore[reportMissingImports]
     from curl_cffi.requests import Session as CurlSession  # pyright: ignore[reportMissingImports]
     HAS_CURL_CFFI = True
 except ImportError:
+    CurlHttpVersion = None  # type: ignore[assignment]
     CurlMime = None  # type: ignore[assignment]
     HAS_CURL_CFFI = False  # pyright: ignore[reportConstantRedefinition]
 
@@ -591,12 +592,13 @@ class PayPalSession:
         self._high_entropy_hints = build_high_entropy_hints(state)
         self.traffic_recorder = get_global_traffic_recorder()
         selected_transport = (transport or "").strip().lower()
-        if selected_transport not in {"", "httpx", "curl-chrome"}:
+        if selected_transport not in {"", "httpx", "curl-chrome", "curl-chrome-http1"}:
             raise ValueError(f"unsupported PayPalSession transport: {transport}")
-        if selected_transport == "curl-chrome" and not HAS_CURL_CFFI:
+        if selected_transport in {"curl-chrome", "curl-chrome-http1"} and not HAS_CURL_CFFI:
             raise RuntimeError("curl_cffi is required for curl-chrome transport")
+        self._curl_http1 = selected_transport == "curl-chrome-http1"
         self._use_curl = (
-            selected_transport == "curl-chrome"
+            selected_transport in {"curl-chrome", "curl-chrome-http1"}
             or (
                 selected_transport == ""
                 and HAS_CURL_CFFI
@@ -951,6 +953,10 @@ class PayPalSession:
                 kwargs["data"] = content
         if "files" in kwargs and kwargs["files"] is not None:
             kwargs["multipart"] = self._files_to_curl_multipart(kwargs.pop("files"))
+        if self._curl_http1:
+            if CurlHttpVersion is None:
+                raise RuntimeError("curl_cffi HTTP version selection is unavailable")
+            kwargs.setdefault("http_version", CurlHttpVersion.V1_1)
         return kwargs
 
     def _inject_high_entropy_hints(self, url: str, kwargs: dict[str, Any]) -> None:
