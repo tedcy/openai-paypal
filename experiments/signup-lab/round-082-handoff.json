@@ -1,0 +1,25 @@
+{
+  "round": 82,
+  "mode": "handoff",
+  "control": "queued BA A with unchanged CookieJar plus generated iOS/CriOS 136 headers on a fresh Profile and SID",
+  "ba_hash": "59d81f31de97d244",
+  "proxy_hash": "1575ec9b9b47d774",
+  "profile_hash": "135c4f7e75be9e11",
+  "result": "EXTERNAL_STEER_INTERRUPTED_AFTER_PAY",
+  "final_observed_stage": "pay",
+  "requested_protocol_cookie_source": "browser-jar",
+  "requested_protocol_header_source": "generated-ios136",
+  "signup_request_paused_count": 0,
+  "protocol_request_sent": false,
+  "capture_integrity": "not_finalized_after_external_termination",
+  "profile_cleanup": "retained_pending_exact_cleanup",
+  "network_environment_inspected": false,
+  "evidence": [
+    "the queued BA completed approval navigation and reached /pay with 24 page controls",
+    "no genericError was observed, so the new BA remains active",
+    "the active command was interrupted when the conversation steered to a status request before signup pause",
+    "the ordered CDP writer did not drain, leaving events.jsonl empty and no final checkpoint",
+    "generated handoff headers were not sent and no out-of-scope action occurred"
+  ],
+  "conclusion": "This is an external execution interruption, not a BA, SID, browser or protocol result. Precisely clean the owned Profile and repeat the unchanged generated-header experiment with the same BA and a fresh SID."
+}
