@@ -869,7 +869,10 @@ def test_signup_document_requires_healthy_signup_html() -> None:
     )
 
     assert valid["valid"] is True
+    assert valid["reason"] == "ready"
+    assert valid["path"] == "/checkoutweb/signup"
     assert challenged["valid"] is False
+    assert challenged["reason"] == "http_status_403"
     assert set(challenged["challenge_markers"]) >= {"datadome", "security challenge"}
     assert challenged["terminal_challenge_markers"]
     assert healthy_with_passive_helpers["valid"] is True

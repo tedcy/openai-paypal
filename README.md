@@ -57,7 +57,7 @@ python -m playwright install chromium
 cp .env.example .env
 ```
 
-不要提交 `.env`、OTP、Cookie、手机号、抓包或 access token。程序侧 traffic recorder 固定为脱敏元数据/body 哈希模式，不落盘原始请求或响应体。
+不要提交 `.env`、OTP、Cookie、手机号、抓包或 access token。程序侧 traffic recorder 默认只记录脱敏元数据/body 哈希；Web 明确勾选“记录流量”时会额外把完整响应体写入 Git 忽略的私有 capture body 文件，但请求体、Cookie header 和事件索引中的 token URL 仍保持脱敏。
 
 ## 命令行
 
@@ -106,6 +106,8 @@ Web 的“执行路线”有三种：
 Web 不再提供环境变量代理、自定义代理或代理开关。服务端从 Git 忽略的 `var/signup-lab/inputs-ba.toml` 读取第一条代理作为账号模板，只使用其中的 host、port、账号结构和密码；BA、手机号及游标不会从该文件导入。每个 Web 任务按手机号国家重写 `region`，并生成新的 8 位 SID。任务列表和日志展示 host:port、region 与 SID，密码始终隐藏。
 
 纯协议到 Signup 成功时，任务结果包含 HTTP 状态、脱敏 signup URL、approval 结构诊断、`roxy_api_calls=0` 和 `stopped_before_signup_mutation=true`。如果 approval 没有形成有效应用或 signup 被 challenge，任务标为 failed，但保留脱敏分类结果供排查。
+
+纯协议完整流程会在发送 OTP 前再次验证 signup 文档：必须是有效的 `/checkoutweb/signup` HTTP 200 应用页面；`genericError`、challenge、重定向或缺少应用内容都会立即终止。OTP 诊断分别显示 HTTP 状态和 `business_success/state/errors`，只有 Confirm 响应体明确返回 `state=CONFIRMED` 且没有 GraphQL errors 才算验证码业务成功。
 
 ## Windows Docker Desktop
 

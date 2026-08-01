@@ -211,6 +211,7 @@ class PayPalFlow:
         protocol_transport: str | None = None,
         browser_profile_seed: Mapping[str, object] | None = None,
         protocol_impersonate: str | None = None,
+        require_valid_signup_document: bool = False,
     ):
         self.ba_token = parse_ba_token(ba_token)
         self.user = user
@@ -243,6 +244,7 @@ class PayPalFlow:
         self.protocol_transport = protocol_transport
         self.browser_profile_seed = dict(browser_profile_seed or {})
         self.protocol_impersonate = protocol_impersonate
+        self.require_valid_signup_document = bool(require_valid_signup_document)
         self._requested_risk_signals_mode = self._risk_signals_mode_raw()
         self._roxy_runtime_disabled_reason = ""
         keep_roxy_browser = self._roxy_runtime_requested()
@@ -2297,6 +2299,8 @@ class PayPalFlow:
                 try:
                     self._phase0_initial_load()
                     self._phase2_create_account()
+                    if bool(getattr(self, "require_valid_signup_document", False)):
+                        self._require_valid_signup_document()
                     self._phase3_signup_and_2fa()
                     result = self._with_risk_runtime_report(self._phase4_authorize())
                 except Exception as attempt_error:
@@ -2353,8 +2357,6 @@ class PayPalFlow:
 
     def run_until_signup(self) -> dict[str, object]:
         """Execute protocol Phase 0/2 and stop before any signup mutation."""
-        from paypal.signup_lab import classify_signup_document
-
         try:
             self._log_flow_attempt_start(1)
             self._phase0_initial_load()
@@ -2364,15 +2366,7 @@ class PayPalFlow:
                     "response did not expose a usable Next application context"
                 )
             self._phase2_create_account()
-            body = str(getattr(self, "_last_signup_html", "") or "")
-            url = str(getattr(self, "_last_signup_url", "") or self.state.signup_url or "")
-            status = int(getattr(self, "_last_signup_status", 0) or 0)
-            classification = classify_signup_document(
-                status,
-                "text/html" if body else "",
-                body,
-                url,
-            )
+            status, url, classification = self._classify_current_signup_document()
             return {
                 "status": "protocol_signup_ready" if classification["valid"] else "signup_blocked",
                 "http_status": status,
@@ -2392,6 +2386,67 @@ class PayPalFlow:
             }
         finally:
             self.close()
+
+    def _remember_signup_response(self, response: object, fallback_url: str = "") -> None:
+        """Retain the final signup document, including rejected responses."""
+        body = str(getattr(response, "text", "") or "")
+        headers = getattr(response, "headers", {}) or {}
+        try:
+            content_type = str(headers.get("content-type") or headers.get("Content-Type") or "")
+        except Exception:
+            content_type = ""
+        status = int(getattr(response, "status_code", 0) or 0)
+        response_url = str(getattr(response, "url", "") or fallback_url or "")
+        if 300 <= status < 400:
+            try:
+                location = str(headers.get("location") or headers.get("Location") or "")
+            except Exception:
+                location = ""
+            if location:
+                response_url = urllib.parse.urljoin(response_url or fallback_url, location)
+        self._last_signup_html = body
+        self._last_signup_url = response_url
+        self._last_signup_status = status
+        self._last_signup_content_type = content_type
+
+    def _classify_current_signup_document(self) -> tuple[int, str, dict[str, Any]]:
+        from paypal.signup_lab import classify_signup_document
+
+        body = str(getattr(self, "_last_signup_html", "") or "")
+        url = str(getattr(self, "_last_signup_url", "") or self.state.signup_url or "")
+        status = int(getattr(self, "_last_signup_status", 0) or 0)
+        content_type = str(getattr(self, "_last_signup_content_type", "") or "")
+        if not content_type and body:
+            content_type = "text/html"
+        return status, url, classify_signup_document(status, content_type, body, url)
+
+    def _require_valid_signup_document(self) -> dict[str, Any]:
+        """Stop the full protocol flow before OTP unless signup is healthy."""
+        status, url, classification = self._classify_current_signup_document()
+        if classification.get("valid") is True:
+            logger.info(
+                "Signup document business gate passed: HTTP {} path={} bytes={}",
+                status,
+                urllib.parse.urlsplit(url or "").path or "/",
+                classification.get("bytes", 0),
+            )
+            return classification
+
+        reason = str(classification.get("reason") or "invalid_signup_document")
+        path = urllib.parse.urlsplit(url or "").path or "/"
+        logger.error(
+            "Signup document business gate rejected before OTP: HTTP {} path={} "
+            "reason={} terminal_challenge={} invalid_ba={}",
+            status,
+            path,
+            reason,
+            bool(classification.get("terminal_challenge_markers")),
+            bool(classification.get("invalid_ba_markers")),
+        )
+        raise RuntimeError(
+            f"PROTOCOL_SIGNUP_DOCUMENT_INVALID: http_status={status} "
+            f"path={path} reason={reason}"
+        )
 
     def _protocol_approval_application_ready(self) -> bool:
         """Return whether Phase 0 produced the real ModXO application shell.
@@ -5554,6 +5609,81 @@ class PayPalFlow:
     def _on_phone_updated(self) -> None:
         pass
 
+    def _on_otp_business_result(
+        self,
+        operation: str,
+        outcome: dict[str, object],
+    ) -> None:
+        """Hook for UI adapters to publish non-sensitive OTP diagnostics."""
+
+    def _graphql_http_status(self, operation_name: str) -> int:
+        meta = getattr(self.session, "last_graphql_response_meta", {}) or {}
+        if str(meta.get("operation_name") or "") != operation_name:
+            return 0
+        try:
+            return int(meta.get("http_status") or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    @staticmethod
+    def _otp_error_summary(errors: object) -> list[dict[str, object]]:
+        if not isinstance(errors, list):
+            return []
+        summaries: list[dict[str, object]] = []
+        for item in errors[:10]:
+            if not isinstance(item, dict):
+                summaries.append({"message": str(sanitize_for_log({"message": item})["message"])})
+                continue
+            extensions = item.get("extensions") if isinstance(item.get("extensions"), dict) else {}
+            summaries.append(
+                {
+                    "message": str(
+                        sanitize_for_log({"message": item.get("message") or ""})["message"]
+                    ),
+                    "code": str(
+                        sanitize_for_log(
+                            {
+                                "code": extensions.get("code")
+                                or extensions.get("errorCode")
+                                or item.get("code")
+                                or ""
+                            }
+                        )["code"]
+                    ),
+                }
+            )
+        return summaries
+
+    def _publish_otp_business_result(
+        self,
+        operation: str,
+        *,
+        business_success: bool,
+        state: object,
+        errors: object,
+    ) -> dict[str, object]:
+        error_summary = self._otp_error_summary(errors)
+        state_text = str(sanitize_for_log({"state": str(state or "")})["state"]) or "<missing>"
+        outcome: dict[str, object] = {
+            "operation": operation,
+            "http_status": self._graphql_http_status(operation),
+            "business_success": bool(business_success),
+            "state": state_text,
+            "error_count": len(errors) if isinstance(errors, list) else 0,
+            "errors": error_summary,
+        }
+        logger.info(
+            "OTP GraphQL business result: operation={} HTTP {} "
+            "business_success={} state={} error_count={}",
+            operation,
+            outcome["http_status"] or "<unknown>",
+            outcome["business_success"],
+            outcome["state"],
+            outcome["error_count"],
+        )
+        self._on_otp_business_result(operation, outcome)
+        return outcome
+
 
     def _update_user_phone(self, phone: str):
         """Update OTP phone fields without changing the task country."""
@@ -5732,17 +5862,35 @@ class PayPalFlow:
             json.dumps(sanitize_for_log(initiate_result), ensure_ascii=False, indent=2)[:500],
         )
 
-        result_obj = initiate_result[0] if isinstance(initiate_result, list) else initiate_result
-        tfa_data = result_obj.get("data", {}).get(
+        result_obj = initiate_result[0] if isinstance(initiate_result, list) and initiate_result else initiate_result
+        if not isinstance(result_obj, dict):
+            raise RuntimeError("OTP initiation returned an invalid GraphQL response shape")
+        result_data = result_obj.get("data") if isinstance(result_obj.get("data"), dict) else {}
+        tfa_data = result_data.get(
             "initiateRiskBasedTwoFactorPhoneConfirmation", {}
-        )
+        ) or {}
+        if not isinstance(tfa_data, dict):
+            tfa_data = {}
         auth_id = tfa_data.get("authId", "")
         challenge_id = tfa_data.get("challengeId", "")
         state = tfa_data.get("state", "")
+        raw_errors = result_obj.get("errors")
+        errors = raw_errors if isinstance(raw_errors, list) else ([raw_errors] if raw_errors else [])
+        accepted = bool(auth_id and challenge_id) and not errors
+        self._publish_otp_business_result(
+            "InitiateRiskBasedTwoFactorPhoneConfirmationMutation",
+            business_success=accepted,
+            state=state,
+            errors=errors,
+        )
         logger.info("2FA state: {}, authId=<redacted>, challengeId=<redacted>", state)
 
-        if not auth_id or not challenge_id:
-            raise RuntimeError("Failed to get authId/challengeId from 2FA initiation")
+        if not accepted:
+            reason = "graphql_errors" if errors else "missing_auth_context"
+            raise RuntimeError(
+                "OTP_INITIATION_BUSINESS_FAILED: "
+                f"state={state or '<missing>'} reason={reason}"
+            )
         return auth_id, challenge_id
 
     def _confirm_2fa_phone_confirmation(
@@ -5782,16 +5930,29 @@ class PayPalFlow:
             json.dumps(sanitize_for_log(confirm_result), ensure_ascii=False, indent=2)[:500],
         )
 
-        result_obj = confirm_result[0] if isinstance(confirm_result, list) else confirm_result
-        confirm_data = result_obj.get("data", {}).get(
+        result_obj = confirm_result[0] if isinstance(confirm_result, list) and confirm_result else confirm_result
+        if not isinstance(result_obj, dict):
+            raise RuntimeError("OTP confirmation returned an invalid GraphQL response shape")
+        result_data = result_obj.get("data") if isinstance(result_obj.get("data"), dict) else {}
+        confirm_data = result_data.get(
             "confirmRiskBasedTwoFactorPhoneConfirmation", {}
         ) or {}
+        if not isinstance(confirm_data, dict):
+            confirm_data = {}
         confirm_state = confirm_data.get("state", "")
-        if confirm_state == "CONFIRMED":
+        raw_errors = result_obj.get("errors")
+        errors = raw_errors if isinstance(raw_errors, list) else ([raw_errors] if raw_errors else [])
+        confirmed = str(confirm_state or "").upper() == "CONFIRMED" and not errors
+        self._publish_otp_business_result(
+            "ConfirmRiskBasedTwoFactorPhoneConfirmationMutation",
+            business_success=confirmed,
+            state=confirm_state,
+            errors=errors,
+        )
+        if confirmed:
             logger.success("OTP confirmed successfully!")
             return True
 
-        errors = result_obj.get("errors") or []
         if errors:
             logger.warning(
                 "OTP confirmation failed with errors: {}",
@@ -6759,10 +6920,7 @@ class PayPalFlow:
                     },
                 )
                 self._capture_datadome_clientid(signup_resp.text)
-                if getattr(signup_resp, "status_code", 0) == 200 and self._signup_context_seed_html_looks_usable(signup_resp.text):
-                    self._last_signup_html = signup_resp.text
-                    self._last_signup_url = str(getattr(signup_resp, "url", "") or self.state.signup_url)
-                    self._last_signup_status = int(getattr(signup_resp, "status_code", 200) or 200)
+                self._remember_signup_response(signup_resp, self.state.signup_url)
                 self._apply_signup_content_metadata(signup_resp.text)
                 if self._content_metadata_is_unresolved():
                     self._ensure_live_signup_content_manifest(referer=self.state.signup_url)
@@ -7189,10 +7347,7 @@ class PayPalFlow:
                         },
                     )
                     self._capture_datadome_clientid(signup_resp.text)
-            if getattr(signup_resp, "status_code", 0) == 200 and self._signup_context_seed_html_looks_usable(signup_resp.text):
-                self._last_signup_html = signup_resp.text
-                self._last_signup_url = str(getattr(signup_resp, "url", "") or signup_url)
-                self._last_signup_status = int(getattr(signup_resp, "status_code", 200) or 200)
+            self._remember_signup_response(signup_resp, signup_url)
             self._apply_signup_content_metadata(signup_resp.text)
             manifest_url = (
                 self._extract_content_manifest_url(

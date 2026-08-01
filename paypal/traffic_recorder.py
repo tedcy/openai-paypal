@@ -330,7 +330,13 @@ def request_body_from_kwargs(kwargs: dict[str, Any]) -> tuple[bytes | None, str,
 class TrafficRecorder:
     """Write request/response records in a roxy-like directory layout."""
 
-    def __init__(self, root: str | Path | None = None, *, lab_raw: bool = False):
+    def __init__(
+        self,
+        root: str | Path | None = None,
+        *,
+        lab_raw: bool = False,
+        capture_response_bodies: bool = False,
+    ):
         configured = (
             str(root or "").strip()
             or os.getenv("PAYPAL_TRAFFIC_RECORD_DIR", "").strip()
@@ -348,11 +354,13 @@ class TrafficRecorder:
         self.requests_tsv = self.network_dir / "requests.tsv"
         self.summary_file = self.root / "summary.json"
         self.meta_file = self.root / "metadata.json"
-        # Raw capture is available only through the explicit signup-lab
+        # Raw request capture is available only through the explicit signup-lab
         # constructor argument. Environment variables cannot enable it for the
-        # normal payment flow. Signup lab stops before credentials/OTP/card.
+        # normal payment flow. A Web operator may explicitly retain response
+        # bodies for business-result diagnostics without persisting request
+        # bodies, Cookie headers, or unredacted token URLs in the event index.
         self.raw_bodies = bool(lab_raw)
-        self.response_bodies = bool(lab_raw)
+        self.response_bodies = bool(lab_raw or capture_response_bodies)
         self.max_preview = int(os.getenv("PAYPAL_TRAFFIC_PREVIEW_BYTES", "4000") or "4000")
         self._lock = threading.Lock()
         self._seq = 0
@@ -580,7 +588,10 @@ class TrafficRecorder:
                 body,
                 content_type,
             )
-        safe_url = url if self.response_bodies else _redact_url(url)
+        # Saving a response body must not implicitly make the surrounding
+        # event index raw. Only signup-lab's explicit raw mode may retain full
+        # URLs and response headers in events.jsonl.
+        safe_url = url if self.raw_bodies else _redact_url(url)
         rec = {
             "id": req_id,
             "time": _now(),
@@ -588,17 +599,18 @@ class TrafficRecorder:
             "method": method.upper(),
             "url": safe_url,
             "status": int(status) if str(status).isdigit() else status,
-            "headers": headers if self.response_bodies else redact(headers),
+            "headers": headers if self.raw_bodies else redact(headers),
             "synthetic": synthetic,
         }
         if error:
-            rec["error"] = error if self.response_bodies else _redact_text(error)
+            rec["error"] = error if self.raw_bodies else _redact_text(error)
         self._response_seq += 1
         if saved_body:
+            body_fields = {"path", "bytes", "sha256", "text"}
+            if self.raw_bodies:
+                body_fields.add("preview")
             rec["responseBody"] = {
-                k: v
-                for k, v in saved_body.items()
-                if k in {"path", "bytes", "sha256", "text", "preview"}
+                k: v for k, v in saved_body.items() if k in body_fields
             }
         self._append_jsonl(rec)
         request_body = self._request_body_paths.get(req_id, "")

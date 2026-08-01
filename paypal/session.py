@@ -608,6 +608,7 @@ class PayPalSession:
         self.state = state
         self.proxy_url = proxy_url
         self.proxy_label = proxy_label or ("代理已开启" if proxy_url else "代理关闭")
+        self.last_graphql_response_meta: dict[str, object] = {}
         self._accept_ch_received = os.getenv(
             "PAYPAL_FORCE_HIGH_ENTROPY_CH",
             "0",
@@ -1365,6 +1366,15 @@ class PayPalSession:
 
         resp = self.post(url, json=payload, headers=headers)
         debug_id = _paypal_debug_id(resp.headers)
+        self.last_graphql_response_meta = {
+            "operation_name": operation_name,
+            "http_status": int(resp.status_code or 0),
+            "response_bytes": len(resp.content),
+            "paypal_debug_id": debug_id,
+            "json_parsed": False,
+            "response_kind": "unparsed",
+            "error_count": 0,
+        }
         logger.info(
             "GraphQL {} HTTP {} bytes={} paypal_debug_id={}",
             operation_name,
@@ -1407,6 +1417,7 @@ class PayPalSession:
                 pass
 
             if looks_like_paypal_authchallenge(text):
+                self.last_graphql_response_meta["response_kind"] = "authchallenge_html"
                 logger.warning(
                     "GraphQL {} returned PayPal authchallenge HTML: status={} paypal_debug_id={} body={}",
                     operation_name,
@@ -1415,6 +1426,7 @@ class PayPalSession:
                     sanitize_for_log({"body": text[:1200]})["body"],
                 )
                 raise PayPalAuthChallenge(operation_name, resp.status_code, debug_id, text)
+            self.last_graphql_response_meta["response_kind"] = "non_json"
             logger.error(
                 "GraphQL {} returned non-JSON response: status={} paypal_debug_id={} body={}",
                 operation_name,
@@ -1425,6 +1437,18 @@ class PayPalSession:
             raise
 
         result_items = result if isinstance(result, list) else [result]
+        error_count = sum(
+            len(item.get("errors") or [])
+            for item in result_items
+            if isinstance(item, dict) and isinstance(item.get("errors") or [], list)
+        )
+        self.last_graphql_response_meta.update(
+            {
+                "json_parsed": True,
+                "response_kind": "json",
+                "error_count": error_count,
+            }
+        )
         for item in result_items:
             if not isinstance(item, dict) or not item.get("errors"):
                 continue

@@ -171,6 +171,166 @@ def test_cold_protocol_approval_shape_requires_current_flight_context() -> None:
     }
 
 
+def test_full_protocol_rejects_generic_error_before_phase3() -> None:
+    flow = _bare_flow("US")
+    flow.max_flow_attempts = 1
+    flow.require_valid_signup_document = True
+    flow._log_flow_attempt_start = lambda _attempt: None
+    flow.close = lambda: None
+    calls: list[str] = []
+
+    def phase0() -> None:
+        calls.append("phase0")
+
+    def phase2() -> None:
+        calls.append("phase2")
+        flow._last_signup_status = 200
+        flow._last_signup_url = "https://www.paypal.com/checkoutweb/genericError?code=TEST"
+        flow._last_signup_content_type = "text/html; charset=utf-8"
+        flow._last_signup_html = "<html><div>genericError</div></html>"
+
+    flow._phase0_initial_load = phase0
+    flow._phase2_create_account = phase2
+    flow._phase3_signup_and_2fa = lambda: calls.append("phase3")
+    flow._phase4_authorize = lambda: calls.append("phase4")
+
+    with pytest.raises(
+        RuntimeError,
+        match=r"PROTOCOL_SIGNUP_DOCUMENT_INVALID:.*unexpected_path",
+    ):
+        flow.run()
+
+    assert calls == ["phase0", "phase2"]
+
+
+def test_signup_response_diagnostic_resolves_redirect_location() -> None:
+    flow = _bare_flow("US")
+    flow._remember_signup_response(
+        SimpleNamespace(
+            status_code=302,
+            text="",
+            url="https://www.paypal.com/checkoutweb/signup?token=EC-SECRET",
+            headers={"Location": "/checkoutweb/genericError?code=TEST"},
+        )
+    )
+
+    assert flow._last_signup_status == 302
+    assert flow._last_signup_url == "https://www.paypal.com/checkoutweb/genericError?code=TEST"
+    assert flow._last_signup_content_type == ""
+
+
+class _OtpGraphqlSession:
+    def __init__(self, result: dict[str, object], status: int = 200) -> None:
+        self.result = result
+        self.status = status
+        self.last_graphql_response_meta: dict[str, object] = {}
+
+    def graphql(self, operation_name, *_args, **_kwargs):
+        self.last_graphql_response_meta = {
+            "operation_name": operation_name,
+            "http_status": self.status,
+            "json_parsed": True,
+        }
+        return self.result
+
+
+def test_otp_http_200_rejected_state_is_not_business_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("paypal.flow.send_weasley_log", lambda *_args, **_kwargs: None)
+    flow = _bare_flow("US")
+    flow.session = _OtpGraphqlSession(
+        {
+            "data": {
+                "confirmRiskBasedTwoFactorPhoneConfirmation": {
+                    "state": "REJECTED",
+                }
+            }
+        }
+    )
+    outcomes: list[dict[str, object]] = []
+    flow._on_otp_business_result = lambda _operation, outcome: outcomes.append(outcome)
+
+    confirmed = flow._confirm_2fa_phone_confirmation(
+        "EC-12345678ABCDEFG",
+        "https://www.paypal.com/checkoutweb/signup",
+        "AUTH-ID",
+        "CHALLENGE-ID",
+        "123456",
+    )
+
+    assert confirmed is False
+    assert outcomes == [
+        {
+            "operation": "ConfirmRiskBasedTwoFactorPhoneConfirmationMutation",
+            "http_status": 200,
+            "business_success": False,
+            "state": "REJECTED",
+            "error_count": 0,
+            "errors": [],
+        }
+    ]
+
+
+def test_otp_confirm_requires_confirmed_state_without_graphql_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("paypal.flow.send_weasley_log", lambda *_args, **_kwargs: None)
+    flow = _bare_flow("US")
+    flow.session = _OtpGraphqlSession(
+        {
+            "data": {
+                "confirmRiskBasedTwoFactorPhoneConfirmation": {
+                    "state": "CONFIRMED",
+                }
+            },
+            "errors": [{"message": "confirmation warning", "extensions": {"code": "OTP_ERROR"}}],
+        }
+    )
+    outcomes: list[dict[str, object]] = []
+    flow._on_otp_business_result = lambda _operation, outcome: outcomes.append(outcome)
+
+    assert flow._confirm_2fa_phone_confirmation(
+        "EC-12345678ABCDEFG",
+        "https://www.paypal.com/checkoutweb/signup",
+        "AUTH-ID",
+        "CHALLENGE-ID",
+        "123456",
+    ) is False
+    assert outcomes[0]["http_status"] == 200
+    assert outcomes[0]["business_success"] is False
+    assert outcomes[0]["state"] == "CONFIRMED"
+    assert outcomes[0]["error_count"] == 1
+
+
+def test_otp_initiate_http_200_requires_business_auth_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("paypal.flow.send_weasley_log", lambda *_args, **_kwargs: None)
+    flow = _bare_flow("US")
+    flow.session = _OtpGraphqlSession(
+        {
+            "data": {
+                "initiateRiskBasedTwoFactorPhoneConfirmation": {
+                    "state": "FAILED",
+                }
+            }
+        }
+    )
+    outcomes: list[dict[str, object]] = []
+    flow._on_otp_business_result = lambda _operation, outcome: outcomes.append(outcome)
+
+    with pytest.raises(RuntimeError, match="OTP_INITIATION_BUSINESS_FAILED"):
+        flow._initiate_2fa_phone_confirmation(
+            "EC-12345678ABCDEFG",
+            "https://www.paypal.com/checkoutweb/signup",
+        )
+
+    assert outcomes[0]["http_status"] == 200
+    assert outcomes[0]["business_success"] is False
+    assert outcomes[0]["state"] == "FAILED"
+
+
 def test_shared_paypal_session_supports_curl_chrome_http1() -> None:
     if CurlHttpVersion is None:
         pytest.skip("curl_cffi is not installed")

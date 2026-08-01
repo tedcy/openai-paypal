@@ -164,6 +164,55 @@ def test_traffic_recorder_never_persists_raw_bodies_or_token_urls(
         assert secret not in persisted
 
 
+def test_explicit_response_capture_saves_body_but_keeps_event_index_redacted(
+    tmp_path,
+) -> None:
+    recorder = TrafficRecorder(
+        tmp_path / "capture",
+        capture_response_bodies=True,
+    )
+    request_id = recorder.record_request(
+        "POST",
+        "https://www.paypal.com/graphql?token=EC-1234567890ABCDEF",
+        {"json": {"pin": "123456"}},
+        headers={"Cookie": "session=secret-cookie"},
+    )
+    response = httpx.Response(
+        200,
+        json={
+            "data": {
+                "confirmRiskBasedTwoFactorPhoneConfirmation": {
+                    "state": "REJECTED",
+                    "authId": "AUTH-SECRET",
+                }
+            }
+        },
+        headers={"Set-Cookie": "session=response-secret-cookie"},
+    )
+    recorder.record_response(
+        request_id,
+        "POST",
+        "https://www.paypal.com/graphql?token=EC-1234567890ABCDEF",
+        response,
+    )
+    recorder.close()
+
+    assert recorder.raw_bodies is False
+    assert recorder.response_bodies is True
+    body_files = list(recorder.bodies_dir.glob("*"))
+    assert len(body_files) == 1
+    body_text = body_files[0].read_text(encoding="utf-8")
+    assert '"state":"REJECTED"' in body_text
+    assert "AUTH-SECRET" in body_text
+
+    events = recorder.events_file.read_text(encoding="utf-8")
+    assert "AUTH-SECRET" not in events
+    assert "123456" not in events
+    assert "EC-1234567890ABCDEF" not in events
+    assert "secret-cookie" not in events
+    assert '"responseBody"' in events
+
+
 def test_headless_raw_debug_cannot_be_enabled(monkeypatch) -> None:
     monkeypatch.setenv("PAYPAL_HEADLESS_DEBUG", "1")
     monkeypatch.setenv("PAYPAL_HEADLESS_DEBUG_RAW", "1")

@@ -296,9 +296,27 @@ def classify_signup_document(status: int, content_type: str, body: str, url: str
         and not terminal_challenge
         and not invalid_ba
     )
+    if valid:
+        reason = "ready"
+    elif int(status or 0) != 200:
+        reason = f"http_status_{int(status or 0)}"
+    elif terminal_challenge:
+        reason = "terminal_challenge"
+    elif invalid_ba:
+        reason = "invalid_ba"
+    elif path != "/checkoutweb/signup":
+        reason = "unexpected_path"
+    elif "text/html" not in (content_type or "").lower():
+        reason = "unexpected_content_type"
+    elif not signup_shape:
+        reason = "missing_signup_application"
+    else:
+        reason = "invalid_signup_document"
     return {
         "valid": valid,
+        "reason": reason,
         "status": status,
+        "path": path,
         "content_type": content_type,
         "bytes": len((body or "").encode("utf-8", errors="replace")),
         "body_sha256": hashlib.sha256((body or "").encode("utf-8", errors="replace")).hexdigest(),

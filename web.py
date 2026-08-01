@@ -425,6 +425,7 @@ class WebJob:
     status: str = "queued"  # queued | running | awaiting_otp | completed | failed
     stage: str = "排队中"
     result: dict[str, Any] | None = None
+    otp_diagnostics: dict[str, dict[str, Any]] = field(default_factory=dict)
     error: str = ""
     traceback_text: str = ""
     generated: dict[str, Any] | None = None
@@ -445,6 +446,12 @@ class WebJob:
     def set_generated(self, generated: dict[str, Any]) -> None:
         with self._condition:
             self.generated = generated
+            self.updated_at = now_ts()
+            self._condition.notify_all()
+
+    def set_otp_diagnostic(self, operation: str, outcome: dict[str, object]) -> None:
+        with self._condition:
+            self.otp_diagnostics[operation] = dict(sanitize_payload(outcome))
             self.updated_at = now_ts()
             self._condition.notify_all()
 
@@ -570,6 +577,7 @@ class WebJob:
                 "generated": sanitize_payload(self.generated),
                 "awaiting_otp": self.status == "awaiting_otp",
                 "awaiting_prompt": sanitize_web_visible_text(self.awaiting_prompt),
+                "otp_diagnostics": sanitize_payload(self.otp_diagnostics),
                 "result": safe_result_payload(self.result),
                 "error": sanitize_web_visible_text(self.error, fallback="执行前置准备失败"),
                 "traceback": (
@@ -679,6 +687,13 @@ class WebPayPalFlow(PayPalFlow):
     def _on_phone_updated(self) -> None:
         self.job.phone = self.user.phone
         self.job.set_generated(public_generated_payload(self.user, self.card, self.address))
+
+    def _on_otp_business_result(
+        self,
+        operation: str,
+        outcome: dict[str, object],
+    ) -> None:
+        self.job.set_otp_diagnostic(operation, outcome)
 
     def _confirm_phone_with_retry(self, token: str, signup_url: str):
         """Web version of the CLI input loop."""
@@ -934,7 +949,10 @@ def run_job(job: WebJob) -> None:
             job.set_status("running", "生成用户、卡片和地址")
             if job.record_traffic:
                 traffic_root = resolve_traffic_dir(job.traffic_dir, job.id)
-                traffic_recorder = TrafficRecorder(traffic_root)
+                traffic_recorder = TrafficRecorder(
+                    traffic_root,
+                    capture_response_bodies=True,
+                )
                 set_current_traffic_recorder(traffic_recorder)
                 with job._condition:
                     job.traffic_dir = str(traffic_recorder.root)
@@ -1010,6 +1028,7 @@ def run_job(job: WebJob) -> None:
                 protocol_transport=job.protocol_transport or None,
                 browser_profile_seed=browser_profile_seed,
                 protocol_impersonate=(PROTOCOL_IMPERSONATE if pure_protocol else None),
+                require_valid_signup_document=(job.execution_mode == "protocol_full"),
                 job=job,
             )
             if job.execution_mode == "protocol_signup":

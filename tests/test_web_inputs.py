@@ -236,6 +236,7 @@ def test_protocol_signup_runner_stops_before_full_flow(
     assert kwargs["risk_signals_mode"] == "protocol"
     assert kwargs["browser_profile_seed"]["chrome_major"] == 136
     assert kwargs["browser_profile_seed"]["ua_client_hints_enabled"] is False
+    assert kwargs["require_valid_signup_document"] is False
     assert job.status == "completed"
     assert job.stage == "纯协议 Signup 200，已安全停止"
     assert job.result["roxy_api_calls"] == 0
@@ -313,10 +314,85 @@ def test_protocol_full_runner_uses_full_flow_without_roxy(
 
     assert calls["run"] is True
     assert calls["otp"] == "123456"
+    assert calls["kwargs"]["require_valid_signup_document"] is True
     assert job.status == "completed"
     assert job.result["execution_mode"] == "protocol_full"
     assert job.result["roxy_api_calls"] == 0
     assert job.result["protocol_transport"] == "curl-chrome-http1"
+
+
+def test_web_job_exposes_otp_business_result_separately_from_http_status() -> None:
+    job = web.create_job(
+        owner_device_id="test-otp-diagnostic",
+        ba_token="BA-TESTTOKEN123456",
+        phone="+12025550123",
+        debug=False,
+        max_card_attempts=5,
+        execution_mode="protocol_full",
+    )
+    job.set_otp_diagnostic(
+        "ConfirmRiskBasedTwoFactorPhoneConfirmationMutation",
+        {
+            "operation": "ConfirmRiskBasedTwoFactorPhoneConfirmationMutation",
+            "http_status": 200,
+            "business_success": False,
+            "state": "REJECTED",
+            "error_count": 1,
+            "errors": [{"message": "invalid pin", "code": "OTP_INVALID"}],
+        },
+    )
+
+    public = job.to_dict(include_logs=False)
+    diagnostic = public["otp_diagnostics"][
+        "ConfirmRiskBasedTwoFactorPhoneConfirmationMutation"
+    ]
+    assert diagnostic["http_status"] == 200
+    assert diagnostic["business_success"] is False
+    assert diagnostic["state"] == "REJECTED"
+    assert diagnostic["error_count"] == 1
+
+
+def test_web_traffic_recording_explicitly_captures_response_bodies(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    created: dict[str, object] = {}
+
+    class _Recorder:
+        def __init__(self, root, **kwargs) -> None:
+            self.root = Path(root)
+            self.root.mkdir(parents=True, exist_ok=True)
+            created["kwargs"] = kwargs
+
+        def close(self) -> None:
+            created["closed"] = True
+
+    class _Flow:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def run(self):
+            return {"status": "success"}
+
+    monkeypatch.setattr(web, "TrafficRecorder", _Recorder)
+    monkeypatch.setattr(web, "WebPayPalFlow", _Flow)
+    monkeypatch.setattr(web, "CAPTURES_ROOT", (tmp_path / "captures").resolve())
+    job = web.create_job(
+        owner_device_id="test-response-capture",
+        ba_token="BA-TESTTOKEN123456",
+        phone="+12025550123",
+        debug=False,
+        max_card_attempts=5,
+        execution_mode="protocol_full",
+        record_traffic=True,
+        traffic_dir="",
+    )
+
+    web.run_job(job)
+
+    assert created["kwargs"] == {"capture_response_bodies": True}
+    assert created["closed"] is True
+    assert job.status == "completed"
 
 
 def test_web_ui_exposes_and_locks_protocol_routes() -> None:
