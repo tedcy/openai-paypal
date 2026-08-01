@@ -55,11 +55,48 @@ _INVALID_BA_MARKERS = (
 _SIGNUP_LAB_ROXY_API_TIMEOUT_SECONDS = 60.0
 _SIGNUP_LAB_NAVIGATION_TIMEOUT_SECONDS = 300.0
 _SIGNUP_LAB_INPUT_LOCK = threading.Lock()
+_CDP_NETWORK_ENVIRONMENT_KEYS = {
+    "localipaddress",
+    "localport",
+    "remoteipaddress",
+    "remoteport",
+    "resourceipaddressspace",
+    "securitydetails",
+}
+_CDP_NETWORK_TIMING_KEYS = {
+    "connectend",
+    "connectstart",
+    "dnsend",
+    "dnsstart",
+    "proxyend",
+    "proxystart",
+    "sslend",
+    "sslstart",
+}
 _SIGNUP_NAVIGATION_ACCEPT = (
     "text/html,application/xhtml+xml,application/xml;q=0.9,"
     "image/avif,image/webp,image/apng,*/*;q=0.8,"
     "application/signed-exchange;v=b3;q=0.7"
 )
+
+
+def _strip_cdp_network_environment(value: Any) -> Any:
+    """Remove endpoint identity and network-path timing from CDP evidence."""
+    if isinstance(value, Mapping):
+        cleaned: dict[Any, Any] = {}
+        for key, item in value.items():
+            normalized = str(key).lower()
+            if normalized in _CDP_NETWORK_ENVIRONMENT_KEYS:
+                continue
+            if normalized in _CDP_NETWORK_TIMING_KEYS:
+                continue
+            cleaned[key] = _strip_cdp_network_environment(item)
+        return cleaned
+    if isinstance(value, list):
+        return [_strip_cdp_network_environment(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_strip_cdp_network_environment(item) for item in value)
+    return value
 _IOS_CRIOS_136_USER_AGENT = (
     "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) "
     "AppleWebKit/605.1.15 (KHTML, like Gecko) "
@@ -578,7 +615,7 @@ class CdpCapture:
             self.cdp.on("Fetch.requestPaused", self._paused)
 
     def _record(self, kind: str, event: Mapping[str, Any]) -> None:
-        payload = dict(event)
+        payload = _strip_cdp_network_environment(dict(event))
         resource_type = payload.pop("type", None)
         row: dict[str, Any] = {"time": _utc_now(), "event_kind": kind, **payload}
         if resource_type is not None:
@@ -588,7 +625,7 @@ class CdpCapture:
     def _request(self, event: dict[str, Any]) -> None:
         self.request_event_count += 1
         request_id = str(event.get("requestId") or "")
-        self.requests[request_id] = event
+        self.requests[request_id] = _strip_cdp_network_environment(event)
         url = str((event.get("request") or {}).get("url") or "")
         lowered = url.lower()
         if any(marker in lowered for marker in ("authchallenge", "hcaptchapassive", "/captcha/", "datadome")):
@@ -603,8 +640,9 @@ class CdpCapture:
     def _response(self, event: dict[str, Any]) -> None:
         self.response_event_count += 1
         request_id = str(event.get("requestId") or "")
-        self.responses[request_id] = event
-        response = dict(event.get("response") or {})
+        stored_event = _strip_cdp_network_environment(event)
+        self.responses[request_id] = stored_event
+        response = dict(stored_event.get("response") or {})
         url = str(response.get("url") or "")
         protocol = str(response.get("protocol") or "unknown")
         if urllib.parse.urlsplit(url).scheme.lower() == "https":
@@ -618,7 +656,7 @@ class CdpCapture:
                     "mime_type": str(response.get("mimeType") or ""),
                 }
             )
-        self._record("responseReceived", event)
+        self._record("responseReceived", stored_event)
 
     def _response_extra(self, event: dict[str, Any]) -> None:
         self._record("responseReceivedExtraInfo", event)

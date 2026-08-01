@@ -7,6 +7,7 @@ from paypal.local_headless import _redact_debug_event, headless_optimized_raw_de
 from paypal.traffic_recorder import TrafficRecorder, redact
 from paypal.flow import _cookie_name_summary, _diagnostic_url, _challenge_markers
 from paypal.roxy_fingerprint import _redact_proxy_url
+from paypal.signup_lab import _strip_cdp_network_environment
 
 
 def test_risk_diagnostic_helpers_expose_names_only() -> None:
@@ -26,6 +27,56 @@ def test_proxy_url_redaction_hides_username_and_password() -> None:
     assert redacted == "http://***:***@proxy.test:3010"
     assert "proxy-user" not in redacted
     assert "proxy-password" not in redacted
+
+
+def test_cdp_capture_drops_network_environment_fields() -> None:
+    cleaned = _strip_cdp_network_environment(
+        {
+            "response": {
+                "url": "https://www.paypal.com/pay",
+                "status": 200,
+                "protocol": "http/1.1",
+                "remoteIPAddress": "192.0.2.10",
+                "remotePort": 3010,
+                "resourceIPAddressSpace": "Unknown",
+                "securityDetails": {"sanList": ["www.paypal.com"]},
+                "timing": {
+                    "requestTime": 1.0,
+                    "dnsStart": -1,
+                    "dnsEnd": -1,
+                    "proxyStart": -1,
+                    "proxyEnd": -1,
+                    "connectStart": -1,
+                    "connectEnd": -1,
+                    "sslStart": -1,
+                    "sslEnd": -1,
+                    "sendStart": 0.2,
+                },
+            }
+        }
+    )
+
+    serialized = json.dumps(cleaned).lower()
+    for key in (
+        "remoteipaddress",
+        "remoteport",
+        "resourceipaddressspace",
+        "securitydetails",
+        "dnsstart",
+        "dnsend",
+        "proxystart",
+        "proxyend",
+        "connectstart",
+        "connectend",
+        "sslstart",
+        "sslend",
+    ):
+        assert key not in serialized
+    assert cleaned["response"]["protocol"] == "http/1.1"
+    assert cleaned["response"]["timing"] == {
+        "requestTime": 1.0,
+        "sendStart": 0.2,
+    }
 
 
 def test_runtime_and_traffic_redaction_cover_sensitive_fields() -> None:
