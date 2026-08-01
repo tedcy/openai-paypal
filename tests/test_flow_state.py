@@ -119,6 +119,58 @@ def test_modxo_router_state_rejects_incomplete_flight_fragment() -> None:
     assert flow.state.modxo_router_slot_names == []
 
 
+def test_cold_protocol_stops_on_soft_200_approval_before_phase2() -> None:
+    flow = _bare_flow("BA")
+    phase2_calls = []
+    flow._log_flow_attempt_start = lambda _attempt: None
+
+    def soft_approval() -> None:
+        flow._last_approval_status = 200
+        flow._last_modxo_html = "<html>datadome soft challenge</html>"
+
+    flow._phase0_initial_load = soft_approval
+    flow._phase2_create_account = lambda: phase2_calls.append(True)
+    flow._safe_error_text = str
+    flow.close = lambda: None
+
+    result = flow.run_until_signup()
+
+    assert result["status"] == "failed"
+    assert "PROTOCOL_APPROVAL_APPLICATION_MISSING" in result["error"]
+    assert result["approval_status"] == 200
+    assert result["approval_application_shape"] is False
+    assert result["approval_next_flight"] is False
+    assert result["approval_has_ssrt"] is False
+    assert result["approval_has_ctx_id"] is False
+    assert result["approval_router_slot_count"] == 0
+    assert phase2_calls == []
+
+
+def test_cold_protocol_approval_shape_requires_current_flight_context() -> None:
+    flow = _bare_flow("BA")
+    flow._last_approval_status = 200
+    flow._last_modxo_html = "<script>self.__next_f.push([])</script>"
+    flow.state.ssrt = "1785561075940"
+    flow.state.ctx_id = "ctx-current"
+    flow.state.modxo_router_slot_names = [
+        "authFlow",
+        "emailUl",
+        "onboarding",
+        "tokenizedLogin",
+    ]
+
+    assert flow._protocol_approval_application_ready() is True
+    assert flow._protocol_approval_diagnostic() == {
+        "approval_status": 200,
+        "approval_body_bytes": len(flow._last_modxo_html.encode("utf-8")),
+        "approval_application_shape": True,
+        "approval_next_flight": True,
+        "approval_has_ssrt": True,
+        "approval_has_ctx_id": True,
+        "approval_router_slot_count": 4,
+    }
+
+
 def test_shared_paypal_session_supports_curl_chrome_http1() -> None:
     if CurlHttpVersion is None:
         pytest.skip("curl_cffi is not installed")

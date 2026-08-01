@@ -2350,6 +2350,11 @@ class PayPalFlow:
         try:
             self._log_flow_attempt_start(1)
             self._phase0_initial_load()
+            if not self._protocol_approval_application_ready():
+                raise RuntimeError(
+                    "PROTOCOL_APPROVAL_APPLICATION_MISSING: initial approval "
+                    "response did not expose a usable Next application context"
+                )
             self._phase2_create_account()
             body = str(getattr(self, "_last_signup_html", "") or "")
             url = str(getattr(self, "_last_signup_url", "") or self.state.signup_url or "")
@@ -2366,6 +2371,7 @@ class PayPalFlow:
                 "signup_url": url,
                 "classification": classification,
                 "roxy_api_calls": 0,
+                **self._protocol_approval_diagnostic(),
             }
         except Exception as exc:
             return {
@@ -2374,9 +2380,40 @@ class PayPalFlow:
                 "http_status": int(getattr(self, "_last_signup_status", 0) or 0),
                 "signup_url": str(getattr(self, "_last_signup_url", "") or self.state.signup_url or ""),
                 "roxy_api_calls": 0,
+                **self._protocol_approval_diagnostic(),
             }
         finally:
             self.close()
+
+    def _protocol_approval_application_ready(self) -> bool:
+        """Return whether Phase 0 produced the real ModXO application shell.
+
+        DataDome/authchallenge responses can deliberately use HTTP 200.  A
+        status-only check therefore lets Phase 2 emit a static Server Action
+        with an empty SSRT/ctxId, obscuring the actual failing boundary.  The
+        current application exposes all four signals below in its initial
+        Flight document; challenge/error shells do not.
+        """
+        html = str(getattr(self, "_last_modxo_html", "") or "")
+        return bool(
+            int(getattr(self, "_last_approval_status", 0) or 0) == 200
+            and "__next_f.push" in html
+            and self.state.ssrt
+            and self.state.ctx_id
+            and self.state.modxo_router_slot_names
+        )
+
+    def _protocol_approval_diagnostic(self) -> dict[str, object]:
+        html = str(getattr(self, "_last_modxo_html", "") or "")
+        return {
+            "approval_status": int(getattr(self, "_last_approval_status", 0) or 0),
+            "approval_body_bytes": len(html.encode("utf-8", errors="replace")),
+            "approval_application_shape": self._protocol_approval_application_ready(),
+            "approval_next_flight": "__next_f.push" in html,
+            "approval_has_ssrt": bool(self.state.ssrt),
+            "approval_has_ctx_id": bool(self.state.ctx_id),
+            "approval_router_slot_count": len(self.state.modxo_router_slot_names or []),
+        }
 
     def _log_flow_attempt_start(self, flow_attempt: int):
         suffix = (
@@ -2601,6 +2638,7 @@ class PayPalFlow:
 
         # Parse the login/signup page
         html = resp.text
+        self._last_approval_status = int(getattr(resp, "status_code", 0) or 0)
         self._last_modxo_html = html
         self._last_modxo_base_url = str(resp.url)
         self._capture_datadome_clientid(html)
