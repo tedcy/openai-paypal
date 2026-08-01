@@ -1,4 +1,6 @@
+import json
 from types import SimpleNamespace
+import urllib.parse
 
 import pytest
 
@@ -58,6 +60,62 @@ def test_phone_update_rejects_cross_country_change() -> None:
     assert flow.user.phone == "+66000000001"
     with pytest.raises(ValueError, match="cannot change"):
         flow._update_user_phone("+38700000000")
+
+
+def test_modxo_router_state_is_derived_from_current_flight_html() -> None:
+    flow = _bare_flow("BA")
+    html = (
+        '<script>self.__next_f.push([1,"'
+        '\\"children\\":[\\"(identity)\\",{'
+        '\\"children\\":[\\"__PAGE__\\",{}],'
+        '\\"authFlow\\":[\\"(__SLOT__)\\",{}],'
+        '\\"emailUl\\":[\\"(__SLOT__)\\",{}],'
+        '\\"onboarding\\":[\\"(__SLOT__)\\",{}],'
+        '\\"pushLogin\\":[\\"(__SLOT__)\\",{}],'
+        '\\"pushLoginStatus\\":[\\"(__SLOT__)\\",{}],'
+        '\\"tokenizedLogin\\":[\\"(__SLOT__)\\",{}]'
+        ']},\\"$undefined\\",\\"$undefined\\",16]'
+        '"])</script>'
+    )
+
+    assert flow._apply_modxo_router_state(html) is True
+    assert flow.state.modxo_router_slot_names == [
+        "authFlow",
+        "emailUl",
+        "onboarding",
+        "pushLogin",
+        "pushLoginStatus",
+        "tokenizedLogin",
+    ]
+
+    tree = json.loads(urllib.parse.unquote(flow._modxo_router_state_tree_header()))
+    identity_routes = tree[1]["children"][1]
+    assert list(identity_routes) == [
+        "children",
+        "authFlow",
+        "emailUl",
+        "onboarding",
+        "pushLogin",
+        "pushLoginStatus",
+        "tokenizedLogin",
+    ]
+    assert identity_routes["pushLoginStatus"] == [
+        "(__SLOT__)",
+        {"children": ["__PAGE__", {}, None, None, 0]},
+        None,
+        None,
+        0,
+    ]
+
+
+def test_modxo_router_state_rejects_incomplete_flight_fragment() -> None:
+    flow = _bare_flow("BA")
+
+    assert flow._apply_modxo_router_state(
+        '\\"children\\":[\\"(identity)\\",{'
+        '\\"authFlow\\":[\\"(__SLOT__)\\",{}]}'
+    ) is False
+    assert flow.state.modxo_router_slot_names == []
 
 
 def test_partial_signup_token_commits_and_prevents_second_signup() -> None:

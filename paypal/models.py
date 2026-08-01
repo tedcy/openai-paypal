@@ -75,6 +75,7 @@ class SessionState:
     modxo_country_action_bound: str = ""
     modxo_country_selected: bool = False
     modxo_pay_page_url: str = ""
+    modxo_router_slot_names: list[str] = field(default_factory=list)
     passkey_challenge: str = ""
     rp_id: str = ""
     login_phone_country_code: str = ""

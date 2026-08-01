@@ -2021,25 +2021,63 @@ class PayPalFlow:
         return decoded
 
     @staticmethod
-    def _modxo_router_state_tree_header() -> str:
-        """Next router state header captured from the ModXO app-router flow."""
+    def _extract_modxo_router_slot_names(html: str) -> list[str]:
+        """Read identity parallel-route slots from the current Next Flight HTML."""
+        material = str(html or "")
+        marker = '\\"children\\":[\\"(identity)\\"'
+        start = material.find(marker)
+        if start < 0:
+            return []
+        end_marker = ']},\\"$undefined\\",\\"$undefined\\",16]'
+        end = material.find(end_marker, start)
+        segment = material[start : end + len(end_marker)] if end >= 0 else material[start : start + 5000]
+        names = re.findall(
+            r'\\"([A-Za-z][A-Za-z0-9]*)\\":\[\\"\(__SLOT__\)\\"',
+            segment,
+        )
+        unique = list(dict.fromkeys(names))
+        required = {"authFlow", "emailUl", "onboarding", "tokenizedLogin"}
+        if not required.issubset(unique):
+            return []
+        return unique[:32]
+
+    def _apply_modxo_router_state(self, html: str) -> bool:
+        slots = self._extract_modxo_router_slot_names(html)
+        if not slots:
+            logger.warning("Current ModXO response did not expose a usable Next router slot set")
+            return False
+        self.state.modxo_router_slot_names = slots
+        logger.info("ModXO router slots loaded from current response: {}", slots)
+        return True
+
+    def _modxo_router_state_tree_header(self) -> str:
+        """Build the Next router state header from the current response metadata."""
+        slot_names = list(self.state.modxo_router_slot_names or [
+            "authFlow",
+            "cookiedViewUl",
+            "emailUl",
+            "onboarding",
+            "otp",
+            "otpInput",
+            "passkeyUl",
+            "passwordUl",
+            "pushLogin",
+            "pushLoginStatus",
+            "tokenizedLogin",
+        ])
+        page_slot = ["(__SLOT__)", {"children": ["__PAGE__", {}, None, None, 0]}, None, None, 0]
+        identity_routes: dict[str, object] = {
+            "children": ["__PAGE__", {}, None, None, 0],
+        }
+        for name in slot_names:
+            if name != "children":
+                identity_routes[name] = page_slot
         tree = [
             "",
             {
                 "children": [
                     "(identity)",
-                    {
-                        "children": ["__PAGE__", {}, None, None, 0],
-                        "authFlow": ["(__SLOT__)", {"children": ["__PAGE__", {}, None, None, 0]}, None, None, 0],
-                        "cookiedViewUl": ["(__SLOT__)", {"children": ["__PAGE__", {}, None, None, 0]}, None, None, 0],
-                        "emailUl": ["(__SLOT__)", {"children": ["__PAGE__", {}, None, None, 0]}, None, None, 0],
-                        "onboarding": ["(__SLOT__)", {"children": ["__PAGE__", {}, None, None, 0]}, None, None, 0],
-                        "otp": ["(__SLOT__)", {"children": ["__PAGE__", {}, None, None, 0]}, None, None, 0],
-                        "otpInput": ["(__SLOT__)", {"children": ["__PAGE__", {}, None, None, 0]}, None, None, 0],
-                        "passkeyUl": ["(__SLOT__)", {"children": ["__PAGE__", {}, None, None, 0]}, None, None, 0],
-                        "passwordUl": ["(__SLOT__)", {"children": ["__PAGE__", {}, None, None, 0]}, None, None, 0],
-                        "tokenizedLogin": ["(__SLOT__)", {"children": ["__PAGE__", {}, None, None, 0]}, None, None, 0],
-                    },
+                    identity_routes,
                     None,
                     None,
                     0,
@@ -2569,6 +2607,7 @@ class PayPalFlow:
         self._capture_mtr_metadata(html, str(resp.url))
         logger.info(f"Page loaded: {resp.status_code}, {len(html)} bytes")
         self._apply_modxo_inline_metadata(html)
+        self._apply_modxo_router_state(html)
         self._extract_modxo_action_ids(html, str(resp.url))
 
         # Extract ctxId
