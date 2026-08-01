@@ -1,0 +1,29 @@
+{
+  "round": 83,
+  "mode": "handoff",
+  "control": "first fresh CTF BA from the TOML pool with unchanged CookieJar plus generated iOS/CriOS 136 headers",
+  "ba_hash": "933b5c053d0dcaeb",
+  "proxy_hash": "767d8dc4f69e24c3",
+  "profile_hash": "b8a8ca7d4b861a6e",
+  "result": "CREATE_ACCOUNT_ACTIONABILITY_TIMEOUT_BEFORE_HANDOFF",
+  "approval_document_status": 200,
+  "final_observed_stage": "pay",
+  "http_protocol": "http/1.1",
+  "requested_protocol_cookie_source": "browser-jar",
+  "requested_protocol_header_source": "generated-ios136",
+  "request_events": 52,
+  "response_events": 47,
+  "signup_request_paused_count": 0,
+  "protocol_request_sent": false,
+  "capture_integrity": "valid_245_of_245",
+  "profile_cleanup": "retained_pending_exact_cleanup",
+  "network_environment_inspected": false,
+  "evidence": [
+    "the new CTF BA returned approval HTTP 200 over HTTP/1.1 and reached /pay",
+    "the Pay DOM exposed a visible Create an Account submit button inside create-account-form",
+    "Playwright locator.click raised TimeoutError on each actionability attempt until the 300-second navigation deadline",
+    "the flow never reached signup pause, so CookieJar and generated protocol headers were not exercised",
+    "all 245 capture records parsed contiguously and no out-of-scope action occurred"
+  ],
+  "conclusion": "The new BA remains active. Replace only the Playwright actionability click with one page-owned DOM element.click, mark the Create Account action emitted once, and repeat with the same BA and a fresh SID without changing protocol variables."
+}
