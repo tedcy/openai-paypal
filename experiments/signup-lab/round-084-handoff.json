@@ -1,0 +1,41 @@
+{
+  "round": 84,
+  "mode": "handoff",
+  "control": "Round 78 CookieJar success with only captured navigation headers replaced by generated iOS/CriOS 136 headers, plus the isolated one-shot DOM Create Account emission fix",
+  "ba_hash": "933b5c053d0dcaeb",
+  "proxy_hash": "bc872646ad5e9f04",
+  "profile_hash": "d18cbcf98ec3c5a2",
+  "result": "PROTOCOL_SIGNUP_200_GENERATED_IOS136_HEADERS",
+  "http_status": 200,
+  "approval_document_status": 200,
+  "signup_path": "/checkoutweb/signup",
+  "http_protocol": "http/1.1",
+  "protocol_cookie_source": "browser-jar",
+  "protocol_header_source": "generated-ios136",
+  "request_events": 144,
+  "response_events": 135,
+  "signup_request_paused_count": 1,
+  "pause_to_protocol_ms": 844,
+  "protocol_request_sent": true,
+  "protocol_response_status": 200,
+  "signup_shape": true,
+  "terminal_challenge_markers": [],
+  "passive_challenge_markers": [
+    "authchallenge",
+    "datadome",
+    "captcha"
+  ],
+  "capture_integrity": "valid_676_of_676",
+  "profile_cleanup": "closed_and_deleted",
+  "network_environment_inspected": false,
+  "ctf_request_artifact": "exports/ctf-website/openai-paypal-signup-lab/requests/round-084-signup-handoff.txt",
+  "evidence": [
+    "the same fresh CTF BA returned approval HTTP 200 over HTTP/1.1 and the page-owned Create Account action progressed to one paused checkoutweb/signup request",
+    "Python curl-chrome-http1 dispatched within 844ms using the scoped browser CookieJar and deterministic generated iOS/CriOS 136 navigation headers",
+    "the Python response was HTTP 200 text/html with a valid signup application shape and EC context",
+    "passive authchallenge, DataDome and CAPTCHA strings were embedded helpers and no terminal challenge marker was present",
+    "all 676 CDP JSONL records parsed contiguously and the exact owned Profile was deleted after the completed 30-second headed hold",
+    "no phone, OTP, registration, card, funding or authorization action occurred"
+  ],
+  "conclusion": "Captured browser navigation headers are no longer required for a successful signup handoff. Preserve the generated iOS/CriOS 136 builder and scoped CookieJar, then replace only the captured Referer and signup URL with values derived from SessionState in a fresh session."
+}
