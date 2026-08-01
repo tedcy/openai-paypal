@@ -1,0 +1,25 @@
+{
+  "round": 87,
+  "mode": "cold-protocol",
+  "control": "Round 86 retry with the same BA and only the explicitly failed proxy SID replaced",
+  "ba_hash": "8ce81c2bfd0881b2",
+  "proxy_hash": "c596741492ba9f52",
+  "result": "WINDOWS_CAPTURE_PATH_TOO_LONG_AFTER_APPROVAL_200",
+  "phase": "pay_with_card_request_capture",
+  "approval_document_status": 200,
+  "approval_body_bytes": 11814,
+  "http_status": 0,
+  "protocol_transport": "curl-chrome-http1",
+  "roxy_api_calls": 0,
+  "recorder_request_ids_allocated": 3,
+  "response_events": 1,
+  "capture_root": "captures/signup-lab/20260801-cold-protocol-round-87",
+  "network_environment_inspected": false,
+  "evidence": [
+    "the approval document returned HTTP 200 and Phase 2 selected the browser-like Pay_With_Card Server Action path",
+    "the response exposed static action identifiers but did not expose a complete dynamic router-slot fragment",
+    "before either Pay_With_Card POST could be sent, the raw recorder attempted to place the full query and BA in a Windows filename and raised FileNotFoundError",
+    "the failure is local capture-path construction rather than an application response, so neither BA nor proxy is rotated"
+  ],
+  "conclusion": "Bound raw artifact filenames to a short route label plus URL/body hashes while keeping the full URL and body inside the capture, then repeat unchanged with the same BA and proxy."
+}
