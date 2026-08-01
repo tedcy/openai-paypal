@@ -1,0 +1,37 @@
+{
+  "round": 88,
+  "mode": "cold-protocol",
+  "control": "Round 87 repeated with the same BA, proxy, HTTP/1.1 transport and protocol path; only the bounded raw-capture filename fix changed",
+  "ba_hash": "8ce81c2bfd0881b2",
+  "proxy_hash": "c596741492ba9f52",
+  "result": "SOFT_200_APPROVAL_THEN_PAY_AUTHCHALLENGE_GENERIC_ERROR",
+  "phase": "pay_with_card_server_action",
+  "approval_document_status": 200,
+  "approval_body_bytes": 11817,
+  "approval_application_shape": false,
+  "approval_next_flight": false,
+  "approval_identity_router": false,
+  "pay_action_status": 200,
+  "pay_action_body_bytes": 8285,
+  "pay_action_classification": "hcaptchapassive_authchallenge_html",
+  "fallback_chain": [
+    "/pay",
+    "/webapps/hermes",
+    "/checkoutweb/genericError"
+  ],
+  "ec_token_produced": false,
+  "protocol_transport": "curl-chrome-http1",
+  "roxy_api_calls": 0,
+  "traffic_requests": 7,
+  "traffic_responses": 7,
+  "capture_root": "captures/signup-lab/20260801-cold-protocol-round-88",
+  "network_environment_inspected": false,
+  "evidence": [
+    "the initial approval returned HTTP 200 but was an 11.8 KB soft challenge document rather than the 138 KB Next Flight identity application seen in the Round 85 browser baseline",
+    "the approval response established only the ddgl cookie and exposed neither a usable SSRT nor ctxId, so the following Pay action was sent on an incomplete application session",
+    "the generated Next-Action and response-derived router-state hash matched the Round 85 browser request, but the protocol navigation still used a randomized Linux Chrome 149 identity with desktop UA Client Hints instead of the successful iOS 18 CriOS 136 identity without UA Client Hints",
+    "Pay_With_Card returned HTTP 200 hcaptchapassive/authchallenge HTML; the legacy compact fallback then redirected through Hermes to checkoutweb/genericError without producing an EC",
+    "the result is earlier than signup and does not classify the BA as expired or invalid"
+  ],
+  "conclusion": "Treat the initial approval document shape as the current boundary. Reproduce the successful iOS/CriOS navigation identity in cold protocol and reject soft-200 approval pages before emitting any Server Action; only after obtaining a full approval application should Pay multipart, CFCI and dynamic-cookie fields be evaluated."
+}
