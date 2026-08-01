@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>PayPal 协议支付网页端</title>
-  <link rel="stylesheet" href="/static/app.css?v=protocol-routes-1" />
+  <link rel="stylesheet" href="/static/app.css?v=automatic-proxy-1" />
 </head>
 <body>
   <div class="shell">
@@ -69,28 +69,9 @@
               <input id="debug" name="debug" type="checkbox" />
               <span>显示 DEBUG 日志</span>
             </label>
-            <label class="check-row">
-              <input id="proxyEnabled" name="proxyEnabled" type="checkbox" />
-              <span>启用代理</span>
-            </label>
-            <label>
-              <span>代理来源</span>
-              <select id="proxyMode" name="proxyMode">
-                <option value="environment">环境变量代理（PAYPAL_PROXY_URL / PAYPAL_PROXY_POOL）</option>
-                <option value="custom">自定义链式代理 URL</option>
-              </select>
-            </label>
-            <label id="proxyUrlWrap" class="span-all hidden">
-              <span>链式代理 URL</span>
-              <input
-                id="proxyUrl"
-                name="proxyUrl"
-                placeholder="http://user:pass@host:port"
-                autocomplete="off"
-                autocapitalize="off"
-                spellcheck="false"
-              />
-            </label>
+            <p id="automaticProxyHint" class="protocol-preset-hint span-all">
+              自动代理：按手机号国家生成地区，并为每个新任务生成全新 SID；实际 host:port、region 和 SID 见任务日志。
+            </p>
             <label id="fingerprintSourceWrap">
               <span>浏览器指纹来源</span>
               <select id="fingerprintSource" name="fingerprintSource">
@@ -155,7 +136,7 @@
         </form>
         <p class="hint">“纯协议到 Signup”只验证页面并安全停止；“纯协议完整流程”会继续等待 OTP。两种纯协议路线都由服务端固定为 iOS 18 / CriOS 136 / HTTP/1.1，不读取上面三项或 .env 的 Roxy 默认值。</p>
         <p class="hint">标准模式下，本地 Headless 需要 Playwright：<code>pip install -r requirements-headless.txt &amp;&amp; python -m playwright install chromium</code>。</p>
-        <p class="hint">手动模式执行到短信验证时会暂停等待输入；换号必须保持同一国家。SMSBower 仅支持巴西，留空手机号时默认 BR。代理按每个任务生效。</p>
+        <p class="hint">手动模式执行到短信验证时会暂停等待输入；换号必须保持同一国家。SMSBower 仅支持巴西，留空手机号时默认 BR。每个任务自动使用手机号国家对应的代理地区和全新 SID。</p>
         <p class="hint">安全边界：仅可在你明确获授权的封闭 CTF 环境中运行，请勿用于真实支付系统。</p>
       </section>
 
@@ -226,6 +207,6 @@
   </div>
 
   <div id="toast" class="toast hidden"></div>
-  <script src="/static/app.js?v=protocol-routes-1"></script>
+  <script src="/static/app.js?v=automatic-proxy-1"></script>
 </body>
 </html>

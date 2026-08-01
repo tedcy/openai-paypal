@@ -38,7 +38,7 @@ from paypal.protocol_profile import (
     PROTOCOL_TRANSPORT,
     build_ios_crios136_protocol_profile,
 )
-from paypal.proxy import ProxyConfig, build_proxy_config
+from paypal.proxy import ProxyConfig, build_automatic_proxy_config
 from paypal.traffic_recorder import (
     TrafficRecorder,
     clear_current_traffic_recorder,
@@ -407,9 +407,7 @@ class WebJob:
     max_authorize_attempts: int = 2
     card_retry_delay_seconds: float = 6.0
     card_retry_jitter_seconds: float = 2.0
-    proxy_enabled: bool = False
-    proxy_mode: str = "environment"
-    proxy_label: str = "代理关闭"
+    proxy_label: str = "自动代理待分配"
     fingerprint_source: str = "headless"
     datadome_mode: str = "headless"
     mtr_runtime: str = "headless"
@@ -558,8 +556,6 @@ class WebJob:
                 "max_authorize_attempts": self.max_authorize_attempts,
                 "card_retry_delay_seconds": self.card_retry_delay_seconds,
                 "card_retry_jitter_seconds": self.card_retry_jitter_seconds,
-                "proxy_enabled": self.proxy_enabled,
-                "proxy_mode": self.proxy_mode,
                 "proxy_label": self.proxy_label,
                 "fingerprint_source": self.fingerprint_source,
                 "datadome_mode": self.datadome_mode,
@@ -784,9 +780,6 @@ def create_job(
     max_authorize_attempts: int = 2,
     card_retry_delay_seconds: float = 6.0,
     card_retry_jitter_seconds: float = 2.0,
-    proxy_enabled: bool = False,
-    proxy_mode: str = "environment",
-    proxy_url: str = "",
     fingerprint_source: str = "headless",
     datadome_mode: str = "headless",
     mtr_runtime: str = "headless",
@@ -849,14 +842,6 @@ def create_job(
         raise ValueError("换卡随机抖动秒数必须是数字") from exc
     card_retry_jitter_seconds = max(0.0, min(card_retry_jitter_seconds, 30.0))
     debug = bool(debug) and ALLOW_DEBUG_LOGS
-    proxy_mode = (proxy_mode or "environment").strip().lower()
-    if proxy_mode not in {"environment", "custom"}:
-        raise ValueError("代理来源不正确")
-    proxy_url = (proxy_url or "").strip()
-    if proxy_url and len(proxy_url) > 2048:
-        raise ValueError("链式代理 URL 太长")
-    if bool(proxy_enabled) and proxy_mode == "custom" and not proxy_url:
-        raise ValueError("启用自定义链式代理时必须填写代理 URL")
     if execution_mode in PURE_PROTOCOL_EXECUTION_MODES:
         fingerprint_source = PROTOCOL_FINGERPRINT_SOURCE
         datadome_mode = PROTOCOL_DATADOME_MODE
@@ -886,10 +871,7 @@ def create_job(
         raise ValueError("roxy 抓包目录太长")
     if compare_roxy_capture:
         record_traffic = True
-    proxy_config = build_proxy_config(
-        enabled=bool(proxy_enabled),
-        proxy_url=proxy_url if proxy_mode == "custom" else None,
-    )
+    proxy_config = build_automatic_proxy_config(country_profile.country)
     job_id = uuid.uuid4().hex[:12]
     if record_traffic:
         traffic_dir = str(resolve_traffic_dir(traffic_dir, job_id))
@@ -907,8 +889,6 @@ def create_job(
         max_authorize_attempts=max_authorize_attempts,
         card_retry_delay_seconds=card_retry_delay_seconds,
         card_retry_jitter_seconds=card_retry_jitter_seconds,
-        proxy_enabled=proxy_config.enabled,
-        proxy_mode=proxy_mode if proxy_config.enabled else "environment",
         proxy_label=proxy_config.label,
         fingerprint_source=fingerprint_source,
         datadome_mode=datadome_mode,
@@ -961,12 +941,13 @@ def run_job(job: WebJob) -> None:
                     job.updated_at = now_ts()
                     job._condition.notify_all()
                 logger.info("Program traffic recording enabled: {}", traffic_recorder.root)
-            proxy_config = job._proxy_config or build_proxy_config(enabled=job.proxy_enabled)
+            proxy_config = job._proxy_config
+            if proxy_config is None:
+                raise RuntimeError("自动代理状态丢失，任务无法继续")
             sms_provider = None
             if job.sms_provider == "smsbower":
                 sms_provider = _build_smsbower_provider(enabled=True)
                 logger.info("SMS provider: SMSBower auto mode")
-            job.proxy_enabled = proxy_config.enabled
             job.proxy_label = proxy_config.label
             country_profile = (
                 profile_for_phone(job.phone)
@@ -1247,9 +1228,6 @@ class WebHandler(BaseHTTPRequestHandler):
                     max_authorize_attempts=int(data.get("max_authorize_attempts", 2) or 2),
                     card_retry_delay_seconds=float(data.get("card_retry_delay_seconds", 6) or 0),
                     card_retry_jitter_seconds=float(data.get("card_retry_jitter_seconds", 2) or 0),
-                    proxy_enabled=bool(data.get("proxy_enabled", False)),
-                    proxy_mode=str(data.get("proxy_mode", "environment") or "environment"),
-                    proxy_url=str(data.get("proxy_url", "") or ""),
                     fingerprint_source=fingerprint_source,
                     datadome_mode=datadome_mode,
                     mtr_runtime=mtr_runtime,

@@ -1,8 +1,10 @@
+import inspect
 from pathlib import Path
 
 import pytest
 
 import web
+from paypal.proxy import ProxyConfig, ProxyEntry
 
 
 class _DormantThread:
@@ -17,6 +19,19 @@ class _DormantThread:
 @pytest.fixture(autouse=True)
 def _isolate_jobs(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(web.threading, "Thread", _DormantThread)
+    monkeypatch.setattr(
+        web,
+        "build_automatic_proxy_config",
+        lambda country: ProxyConfig(
+            enabled=True,
+            entry=ProxyEntry(
+                host="proxy.test",
+                port=3010,
+                username=f"account-region-{country}-sid-TestSid1-t-120",
+                password="proxy-password",
+            ),
+        ),
+    )
     with web.JOBS_LOCK:
         web.JOBS.clear()
     yield
@@ -42,6 +57,9 @@ def test_web_create_job_accepts_all_country_phones_without_starting_flow(phone: 
     assert job.ba_token == "BA-TESTTOKEN123456"
     assert job.phone == phone
     assert job.status == "queued"
+    assert f"region={web.profile_for_phone(phone).country}" in job.proxy_label
+    assert "sid=TestSid1" in job.proxy_label
+    assert "proxy-password" not in job.proxy_label
 
 
 def test_web_create_job_rejects_unsupported_phone_prefix() -> None:
@@ -314,3 +332,17 @@ def test_web_ui_exposes_and_locks_protocol_routes() -> None:
     assert 'datadome_mode: "protocol"' in javascript
     assert 'mtr_runtime: "python_generated"' in javascript
     assert '$("#smsbowerEnabled").disabled = signupProbe' in javascript
+    assert 'id="automaticProxyHint"' in html
+    assert 'id="proxyMode"' not in html
+    assert 'id="proxyUrl"' not in html
+    assert "PAYPAL_PROXY_URL" not in html
+    assert "proxy_url:" not in javascript
+    assert "syncProxyFields" not in javascript
+
+
+def test_web_job_api_has_no_client_proxy_parameters() -> None:
+    parameters = inspect.signature(web.create_job).parameters
+
+    assert "proxy_enabled" not in parameters
+    assert "proxy_mode" not in parameters
+    assert "proxy_url" not in parameters

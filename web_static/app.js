@@ -127,20 +127,11 @@ function renderJobs(jobs) {
         <span class="badge ${esc(job.status)}">${esc(job.status)}</span>
       </div>
       <div class="job-sub">${esc(job.stage || "")}</div>
-      <div class="job-sub">${esc(job.ba_token || "")} · ${esc(fmtTime(job.created_at))} · ${esc(job.proxy_enabled ? (job.proxy_label || "代理开") : "代理关")} · MODE:${esc(job.execution_mode || "standard")} · SMS:${esc(job.sms_provider || "manual")} · FP:${esc(job.fingerprint_source || "-")} · DD:${esc(job.datadome_mode || "-")} · MTR:${esc(job.mtr_runtime || "-")} · RISK:${esc(job.risk_signals_mode || "-")} · HTTP:${esc(job.protocol_transport || "default")}${job.record_traffic ? " · 发包记录开" : ""}</div>
+      <div class="job-sub">${esc(job.ba_token || "")} · ${esc(fmtTime(job.created_at))} · ${esc(job.proxy_label || "自动代理待分配")} · MODE:${esc(job.execution_mode || "standard")} · SMS:${esc(job.sms_provider || "manual")} · FP:${esc(job.fingerprint_source || "-")} · DD:${esc(job.datadome_mode || "-")} · MTR:${esc(job.mtr_runtime || "-")} · RISK:${esc(job.risk_signals_mode || "-")} · HTTP:${esc(job.protocol_transport || "default")}${job.record_traffic ? " · 发包记录开" : ""}</div>
     </div>`).join("");
   box.querySelectorAll(".job-item").forEach(item => {
     item.addEventListener("click", () => selectJob(item.dataset.jobId));
   });
-}
-
-function syncProxyFields() {
-  const enabled = $("#proxyEnabled").checked;
-  const custom = $("#proxyMode").value === "custom";
-  $("#proxyMode").disabled = !enabled;
-  $("#proxyUrlWrap").classList.toggle("hidden", !(enabled && custom));
-  $("#proxyUrl").disabled = !(enabled && custom);
-  $("#proxyUrl").required = enabled && custom;
 }
 
 function syncTrafficFields() {
@@ -260,7 +251,7 @@ function renderCurrent(job) {
     ? ` · 发包记录：${job.traffic_dir || "准备中"}${job.traffic_report_json ? " · 已生成差异报告" : ""}`
     : "";
   const runtimeMeta = ` · MODE:${job.execution_mode || "standard"} · SMS:${job.sms_provider || "manual"} · FP:${job.fingerprint_source || "-"} · DD:${job.datadome_mode || "-"} · MTR:${job.mtr_runtime || "-"} · RISK:${job.risk_signals_mode || "-"} · HTTP:${job.protocol_transport || "default"}`;
-  $("#currentMeta").textContent = `#${job.id} · 创建于 ${fmtTime(job.created_at)} · ${job.proxy_label || "代理关闭"}${runtimeMeta}${trafficMeta}`;
+  $("#currentMeta").textContent = `#${job.id} · 创建于 ${fmtTime(job.created_at)} · ${job.proxy_label || "自动代理待分配"}${runtimeMeta}${trafficMeta}`;
   $("#jobStatus").textContent = job.status;
   $("#jobStage").textContent = job.stage || "";
   $("#jobDuration").textContent = fmtDuration(job.duration);
@@ -313,16 +304,8 @@ async function pollCurrent(force = false) {
 async function startJob(evt) {
   evt.preventDefault();
   const btn = $("#startBtn");
-  const proxyEnabled = $("#proxyEnabled").checked;
-  const proxyMode = $("#proxyMode").value || "environment";
-  const proxyUrl = proxyEnabled && proxyMode === "custom" ? $("#proxyUrl").value.trim() : "";
   const recordTraffic = $("#recordTraffic").checked || Boolean($("#compareRoxyCapture").value.trim());
   const executionMode = $("#executionMode").value || "standard";
-  if (proxyEnabled && proxyMode === "custom" && !proxyUrl) {
-    toast("请填写链式代理 URL");
-    $("#proxyUrl").focus();
-    return;
-  }
   btn.disabled = true;
   btn.textContent = "启动中…";
   try {
@@ -339,9 +322,6 @@ async function startJob(evt) {
         card_retry_delay_seconds: Number($("#cardRetryDelay").value || 6),
         card_retry_jitter_seconds: Number($("#cardRetryJitter").value || 2),
         debug: $("#debug").checked,
-        proxy_enabled: proxyEnabled,
-        proxy_mode: proxyMode,
-        proxy_url: proxyUrl,
         fingerprint_source: $("#fingerprintSource").value || "headless",
         datadome_mode: $("#datadomeMode").value || "headless",
         mtr_runtime: $("#mtrRuntime").value || "headless",
@@ -422,13 +402,10 @@ function bind() {
   $("#copyLogs").addEventListener("click", copyLogs);
   $("#logsBox").addEventListener("click", copyLogLine);
   $("#clearCurrent").addEventListener("click", () => selectJob(""));
-  $("#proxyEnabled").addEventListener("change", syncProxyFields);
-  $("#proxyMode").addEventListener("change", syncProxyFields);
   $("#recordTraffic").addEventListener("change", syncTrafficFields);
   $("#compareRoxyCapture").addEventListener("input", syncTrafficFields);
   $("#smsbowerEnabled").addEventListener("change", syncSmsFields);
   $("#executionMode").addEventListener("change", syncExecutionModeFields);
-  syncProxyFields();
   syncTrafficFields();
   syncSmsFields();
   syncExecutionModeFields();

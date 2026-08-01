@@ -6,11 +6,19 @@ and direct proxy URLs in the form:
     http://username:password@host:port
 
 Both formats are converted to httpx-compatible proxy URLs.
+
+The Web route additionally derives a country-specific username and fresh SID
+from a Git-ignored local TOML template; it does not consume proxy environment
+variables or client-supplied proxy values.
 """
 from __future__ import annotations
 
 import os
 import random
+import re
+import secrets
+import string
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -18,6 +26,14 @@ from urllib.parse import quote
 
 _TRUE_VALUES = {"1", "true", "yes", "on", "enable", "enabled", "y"}
 _FALSE_VALUES = {"0", "false", "no", "off", "disable", "disabled", "n", ""}
+_ROUTED_PROXY_USERNAME_RE = re.compile(
+    r"^(?P<prefix>.+-region-)(?P<region>[A-Za-z]{2})"
+    r"(?P<middle>-sid-)(?P<sid>[A-Za-z0-9]+)(?P<suffix>-t-\d+.*)$"
+)
+_PROXY_SID_ALPHABET = string.ascii_letters + string.digits
+DEFAULT_WEB_PROXY_TEMPLATE_PATH = (
+    Path(__file__).resolve().parents[1] / "var" / "signup-lab" / "inputs-ba.toml"
+)
 
 
 def _load_dotenv_value(name: str) -> str:
@@ -105,7 +121,14 @@ class ProxyEntry:
     @property
     def masked(self) -> str:
         auth = "***:***@" if self.username or self.password else ""
-        return f"{self.scheme}://{auth}{self.host}:{self.port}"
+        label = f"{self.scheme}://{auth}{self.host}:{self.port}"
+        routed = _ROUTED_PROXY_USERNAME_RE.fullmatch(self.username)
+        if routed:
+            label += (
+                f" [region={routed.group('region').upper()} "
+                f"sid={routed.group('sid')}]"
+            )
+        return label
 
 
 @dataclass(frozen=True)
@@ -169,6 +192,75 @@ def choose_proxy_entry(pool: Iterable[str] | None = None, index: int | None = No
     else:
         raw = random.choice(entries)
     return ProxyEntry.parse(raw)
+
+
+def _fresh_proxy_sid(length: int = 8) -> str:
+    return "".join(secrets.choice(_PROXY_SID_ALPHABET) for _ in range(length))
+
+
+def load_automatic_proxy_template(
+    source_path: str | Path | None = None,
+) -> ProxyEntry:
+    """Load the local proxy seed without consulting environment variables.
+
+    The existing Signup Lab input remains Git-ignored and already contains the
+    provider account/password.  Web reads only its first proxy as a credential
+    template; BA tokens, phone and cursor state are never imported.
+    """
+    path = Path(source_path or DEFAULT_WEB_PROXY_TEMPLATE_PATH).expanduser()
+    if not path.is_absolute():
+        path = Path(__file__).resolve().parents[1] / path
+    try:
+        raw = path.read_text(encoding="utf-8-sig")
+    except OSError as exc:
+        raise ValueError(f"自动代理模板不存在：{path}") from exc
+    try:
+        data = tomllib.loads(raw)
+    except tomllib.TOMLDecodeError as exc:
+        raise ValueError(f"自动代理模板 TOML 无效：{path}") from exc
+    proxies = data.get("proxies")
+    if not isinstance(proxies, list) or not proxies:
+        raise ValueError("自动代理模板缺少 proxies 列表")
+    template = str(proxies[0] or "").strip()
+    if not template:
+        raise ValueError("自动代理模板的第一条代理为空")
+    return ProxyEntry.parse(template)
+
+
+def build_automatic_proxy_config(
+    country: str,
+    *,
+    source_path: str | Path | None = None,
+    sid: str | None = None,
+) -> ProxyConfig:
+    """Generate one country-routed proxy with a fresh provider SID."""
+    region = str(country or "").strip().upper()
+    if not re.fullmatch(r"[A-Z]{2}", region):
+        raise ValueError("自动代理国家必须是两位国家码")
+    session_id = str(sid or _fresh_proxy_sid()).strip()
+    if not re.fullmatch(r"[A-Za-z0-9]{4,32}", session_id):
+        raise ValueError("自动代理 SID 必须是 4-32 位字母或数字")
+
+    template = load_automatic_proxy_template(source_path)
+    routed = _ROUTED_PROXY_USERNAME_RE.fullmatch(template.username)
+    if routed is None:
+        raise ValueError(
+            "自动代理用户名必须包含 region-XX-sid-XXXXXXXX-t-N 结构"
+        )
+    username = (
+        f"{routed.group('prefix')}{region}{routed.group('middle')}"
+        f"{session_id}{routed.group('suffix')}"
+    )
+    return ProxyConfig(
+        enabled=True,
+        entry=ProxyEntry(
+            host=template.host,
+            port=template.port,
+            username=username,
+            password=template.password,
+            scheme=template.scheme,
+        ),
+    )
 
 
 def build_proxy_config(

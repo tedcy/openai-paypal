@@ -101,7 +101,9 @@ Web 的“执行路线”有三种：
 | 纯协议到 Signup | 固定使用 iOS 18、CriOS 136、HTTP/1.1 与协议风控，只验证有效 `/checkoutweb/signup` 200，然后在发送 OTP 或注册请求前停止。必须填写 E.164 手机号，不使用 SMSBower。 |
 | 纯协议完整流程 | 使用同一固定协议 Profile 继续 OTP、Signup、Funding 和 authorize；不会创建 Roxy 窗口。 |
 
-两种纯协议路线由服务端强制使用 `random / protocol / python_generated / protocol` 和 `curl-chrome-http1`；不会被 `.env` 中的 Roxy 默认值或客户端提交的 runtime 字段覆盖。Web 表单中的 BA、手机号和当前任务代理仍然生效。
+两种纯协议路线由服务端强制使用 `random / protocol / python_generated / protocol` 和 `curl-chrome-http1`；不会被 `.env` 中的 Roxy 默认值或客户端提交的 runtime 字段覆盖。Web 表单中的 BA 和手机号仍然生效。
+
+Web 不再提供环境变量代理、自定义代理或代理开关。服务端从 Git 忽略的 `var/signup-lab/inputs-ba.toml` 读取第一条代理作为账号模板，只使用其中的 host、port、账号结构和密码；BA、手机号及游标不会从该文件导入。每个 Web 任务按手机号国家重写 `region`，并生成新的 8 位 SID。任务列表和日志展示 host:port、region 与 SID，密码始终隐藏。
 
 纯协议到 Signup 成功时，任务结果包含 HTTP 状态、脱敏 signup URL、approval 结构诊断、`roxy_api_calls=0` 和 `stopped_before_signup_mutation=true`。如果 approval 没有形成有效应用或 signup 被 challenge，任务标为 failed，但保留脱敏分类结果供排查。
 
