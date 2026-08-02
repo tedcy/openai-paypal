@@ -127,7 +127,7 @@ function renderJobs(jobs) {
         <span class="badge ${esc(job.status)}">${esc(job.status)}</span>
       </div>
       <div class="job-sub">${esc(job.stage || "")}</div>
-      <div class="job-sub">${esc(job.ba_token || "")} · ${esc(fmtTime(job.created_at))} · ${esc(job.proxy_label || "自动代理待分配")} · MODE:${esc(job.execution_mode || "standard")} · SMS:${esc(job.sms_provider || "manual")} · FP:${esc(job.fingerprint_source || "-")} · DD:${esc(job.datadome_mode || "-")} · MTR:${esc(job.mtr_runtime || "-")} · RISK:${esc(job.risk_signals_mode || "-")} · HTTP:${esc(job.protocol_transport || "default")}${job.record_traffic ? " · 发包记录开" : ""}</div>
+      <div class="job-sub">${esc(job.ba_token || "")} · ${esc(fmtTime(job.created_at))} · ${esc(job.proxy_label || "自动代理待分配")} · MODE:${esc(job.execution_mode || "standard")} · SMS:${esc(job.sms_provider || "manual")} · ADDR:${job.address_autocomplete_enabled === false ? "MANUAL" : "AUTO"} · FP:${esc(job.fingerprint_source || "-")} · DD:${esc(job.datadome_mode || "-")} · MTR:${esc(job.mtr_runtime || "-")} · RISK:${esc(job.risk_signals_mode || "-")} · HTTP:${esc(job.protocol_transport || "default")}${job.record_traffic ? " · 发包记录开" : ""}</div>
     </div>`).join("");
   box.querySelectorAll(".job-item").forEach(item => {
     item.addEventListener("click", () => selectJob(item.dataset.jobId));
@@ -202,7 +202,10 @@ function syncExecutionModeFields() {
     $("#smsbowerEnabled").checked = state.smsbowerBeforeSignupProbe;
   }
   $("#smsbowerWrap").classList.toggle("hidden", signupProbe);
+  $("#smsOptions").classList.toggle("hidden", signupProbe);
   $("#smsbowerEnabled").disabled = signupProbe;
+  $("#addressAutocompleteWrap").classList.toggle("hidden", signupProbe);
+  $("#addressAutocompleteEnabled").disabled = signupProbe;
 
   state.lastExecutionMode = mode;
   syncSmsFields();
@@ -250,7 +253,7 @@ function renderCurrent(job) {
   const trafficMeta = job.record_traffic
     ? ` · 发包记录：${job.traffic_dir || "准备中"}${job.traffic_report_json ? " · 已生成差异报告" : ""}`
     : "";
-  const runtimeMeta = ` · MODE:${job.execution_mode || "standard"} · SMS:${job.sms_provider || "manual"} · FP:${job.fingerprint_source || "-"} · DD:${job.datadome_mode || "-"} · MTR:${job.mtr_runtime || "-"} · RISK:${job.risk_signals_mode || "-"} · HTTP:${job.protocol_transport || "default"}`;
+  const runtimeMeta = ` · MODE:${job.execution_mode || "standard"} · SMS:${job.sms_provider || "manual"} · ADDR:${job.address_autocomplete_enabled === false ? "MANUAL" : "AUTO"} · FP:${job.fingerprint_source || "-"} · DD:${job.datadome_mode || "-"} · MTR:${job.mtr_runtime || "-"} · RISK:${job.risk_signals_mode || "-"} · HTTP:${job.protocol_transport || "default"}`;
   $("#currentMeta").textContent = `#${job.id} · 创建于 ${fmtTime(job.created_at)} · ${job.proxy_label || "自动代理待分配"}${runtimeMeta}${trafficMeta}`;
   $("#jobStatus").textContent = job.status;
   $("#jobStage").textContent = job.stage || "";
@@ -316,6 +319,7 @@ async function startJob(evt) {
         phone: $("#phone").value,
         execution_mode: executionMode,
         sms_provider: executionMode !== "protocol_signup" && $("#smsbowerEnabled").checked ? "smsbower" : "manual",
+        address_autocomplete_enabled: $("#addressAutocompleteEnabled").checked,
         max_card_attempts: Number($("#maxCardAttempts").value || 5),
         max_flow_attempts: Number($("#maxFlowAttempts").value || 1),
         max_authorize_attempts: Number($("#maxAuthorizeAttempts").value || 2),

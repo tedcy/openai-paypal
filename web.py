@@ -65,6 +65,22 @@ def env_bool(name: str, default: bool = False) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def request_bool(value: object, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int) and value in {0, 1}:
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    raise ValueError("地址自动补全开关值不正确")
+
+
 def env_int(name: str, default: int, min_value: int, max_value: int) -> int:
     raw = os.getenv(name, "")
     try:
@@ -401,6 +417,7 @@ class WebJob:
     phone: str
     execution_mode: str = "standard"
     sms_provider: str = "manual"
+    address_autocomplete_enabled: bool = True
     debug: bool = False
     max_card_attempts: int = 5
     max_flow_attempts: int = 1
@@ -557,6 +574,7 @@ class WebJob:
                 "ba_token": mask_middle(self.ba_token),
                 "phone": mask_phone(self.phone),
                 "sms_provider": self.sms_provider,
+                "address_autocomplete_enabled": self.address_autocomplete_enabled,
                 "debug": self.debug and ALLOW_DEBUG_LOGS,
                 "max_card_attempts": self.max_card_attempts,
                 "max_flow_attempts": self.max_flow_attempts,
@@ -688,6 +706,9 @@ class WebPayPalFlow(PayPalFlow):
         self.job.phone = self.user.phone
         self.job.set_generated(public_generated_payload(self.user, self.card, self.address))
 
+    def _on_billing_address_updated(self) -> None:
+        self.job.set_generated(public_generated_payload(self.user, self.card, self.address))
+
     def _on_otp_business_result(
         self,
         operation: str,
@@ -791,6 +812,7 @@ def create_job(
     max_card_attempts: int,
     execution_mode: str = "standard",
     sms_provider: str = "manual",
+    address_autocomplete_enabled: bool = True,
     max_flow_attempts: int = 1,
     max_authorize_attempts: int = 2,
     card_retry_delay_seconds: float = 6.0,
@@ -814,6 +836,7 @@ def create_job(
     sms_provider = (sms_provider or "manual").strip().lower()
     if sms_provider not in SMS_PROVIDER_CHOICES:
         raise ValueError("短信接码方式不正确")
+    address_autocomplete_enabled = bool(address_autocomplete_enabled)
     if not phone and sms_provider == "manual":
         raise ValueError("手机号不能为空")
     if phone and not PHONE_RE.fullmatch(phone):
@@ -898,6 +921,7 @@ def create_job(
         phone=phone,
         execution_mode=execution_mode,
         sms_provider=sms_provider,
+        address_autocomplete_enabled=address_autocomplete_enabled,
         debug=debug,
         max_card_attempts=max_card_attempts,
         max_flow_attempts=max_flow_attempts,
@@ -987,13 +1011,14 @@ def run_job(job: WebJob) -> None:
             logger.info("Proxy: {}", proxy_config.label)
             logger.info(
                 "Runtime modes: execution={} fingerprint={} datadome={} mtr={} "
-                "risk={} transport={}",
+                "risk={} transport={} address_autocomplete={}",
                 job.execution_mode,
                 job.fingerprint_source,
                 job.datadome_mode,
                 job.mtr_runtime,
                 job.risk_signals_mode,
                 job.protocol_transport or "default",
+                "strict" if job.address_autocomplete_enabled else "off",
             )
             logger.info("User: {} {}", user.first_name, user.last_name)
             logger.info("Email: {}", mask_email(user.email))
@@ -1029,6 +1054,7 @@ def run_job(job: WebJob) -> None:
                 browser_profile_seed=browser_profile_seed,
                 protocol_impersonate=(PROTOCOL_IMPERSONATE if pure_protocol else None),
                 require_valid_signup_document=(job.execution_mode == "protocol_full"),
+                address_autocomplete_enabled=job.address_autocomplete_enabled,
                 job=job,
             )
             if job.execution_mode == "protocol_signup":
@@ -1043,6 +1069,7 @@ def run_job(job: WebJob) -> None:
                     "execution_mode": job.execution_mode,
                     "protocol_transport": job.protocol_transport,
                     "risk_signals_mode": job.risk_signals_mode,
+                    "address_autocomplete_enabled": job.address_autocomplete_enabled,
                 }
             )
             if pure_protocol:
@@ -1243,6 +1270,10 @@ class WebHandler(BaseHTTPRequestHandler):
                     max_card_attempts=int(data.get("max_card_attempts", 5) or 5),
                     execution_mode=execution_mode,
                     sms_provider=str(data.get("sms_provider", "manual") or "manual"),
+                    address_autocomplete_enabled=request_bool(
+                        data.get("address_autocomplete_enabled"),
+                        True,
+                    ),
                     max_flow_attempts=int(data.get("max_flow_attempts", 1) or 1),
                     max_authorize_attempts=int(data.get("max_authorize_attempts", 2) or 2),
                     card_retry_delay_seconds=float(data.get("card_retry_delay_seconds", 6) or 0),

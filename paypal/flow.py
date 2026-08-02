@@ -89,7 +89,8 @@ from paypal.graphql import (
     BUYER_FUNDING_CONTEXT_QUERY,
     DEFERRED_FEATURE_QUERY,
     INSTALLMENT_OPTIONS_QUERY,
-    ADDRESS_AUTOCOMPLETE_FROM_POSTAL_CODE_QUERY,
+    ADDRESS_AUTOCOMPLETE_QUERY,
+    ADDRESS_FROM_AUTOCOMPLETE_PLACE_ID_QUERY,
     INITIATE_2FA_PHONE_MUTATION,
     CONFIRM_2FA_PHONE_MUTATION,
     SIGNUP_NEW_MEMBER_MUTATION,
@@ -212,6 +213,7 @@ class PayPalFlow:
         browser_profile_seed: Mapping[str, object] | None = None,
         protocol_impersonate: str | None = None,
         require_valid_signup_document: bool = False,
+        address_autocomplete_enabled: bool | None = None,
     ):
         self.ba_token = parse_ba_token(ba_token)
         self.user = user
@@ -245,6 +247,11 @@ class PayPalFlow:
         self.browser_profile_seed = dict(browser_profile_seed or {})
         self.protocol_impersonate = protocol_impersonate
         self.require_valid_signup_document = bool(require_valid_signup_document)
+        self.address_autocomplete_enabled = (
+            self.country_profile.address_mode == "AUTOCOMPLETE"
+            if address_autocomplete_enabled is None
+            else bool(address_autocomplete_enabled)
+        )
         self._requested_risk_signals_mode = self._risk_signals_mode_raw()
         self._roxy_runtime_disabled_reason = ""
         keep_roxy_browser = self._roxy_runtime_requested()
@@ -276,6 +283,7 @@ class PayPalFlow:
         self.captcha_bypass_mode = paypal_captcha_bypass_mode()
         self._used_partial_signup_token = False
         self._billing_address_autocomplete_succeeded = False
+        self._billing_address_autocomplete_type = "MANUAL"
         self._roxy_skipped_telemetry_families: set[str] = set()
         self._signup_billing_address_prepared = False
         self._headless_session: Any | None = None
@@ -2566,6 +2574,7 @@ class PayPalFlow:
         self.captcha_bypass_mode = paypal_captcha_bypass_mode()
         self._used_partial_signup_token = False
         self._billing_address_autocomplete_succeeded = False
+        self._billing_address_autocomplete_type = "MANUAL"
         self._signup_billing_address_prepared = False
         self._headless_session = None
         self._headless_optimized_session = None
@@ -5609,6 +5618,9 @@ class PayPalFlow:
     def _on_phone_updated(self) -> None:
         pass
 
+    def _on_billing_address_updated(self) -> None:
+        """Hook for UI adapters after strict address autocomplete succeeds."""
+
     def _on_otp_business_result(
         self,
         operation: str,
@@ -6096,16 +6108,14 @@ class PayPalFlow:
             self._apply_configured_or_cached_signup_content_metadata()
         content_identifier = self._resolved_content_identifier()
         billing_autocomplete_type = (
-            "ANS"
-            if self.country_profile.address_mode == "AUTOCOMPLETE"
-            and self._billing_address_autocomplete_succeeded
+            self._billing_address_autocomplete_type
+            if self._billing_address_autocomplete_succeeded
             else "MANUAL"
         )
 
         billing_address: dict[str, object] = {
             "postalCode": self.address.postal_code,
             "line1": self._billing_line1(),
-            "line2": self.address.district,
             "city": self.address.city,
             "accountQuality": {
                 "autoCompleteType": billing_autocomplete_type,
@@ -6115,17 +6125,24 @@ class PayPalFlow:
             "familyName": self.user.last_name,
             "givenName": self.user.first_name,
         }
+        if self.address.district:
+            billing_address["line2"] = self.address.district
         if self.address.state:
             billing_address["state"] = self.address.state
 
+        card: dict[str, object] = {
+            "cardNumber": self.card.number,
+            "expirationDate": self._card_expiration_date(),
+            "securityCode": self.card.cvv,
+            "type": card_type,
+        }
+        # checkoutweb only collects CardProductClass for the BR signup form.
+        # Other countries let the card number determine the funding product.
+        if self.country_profile.country == "BR":
+            card["productClass"] = self.card.card_type
+
         variables: dict[str, object] = {
-            "card": {
-                "cardNumber": self.card.number,
-                "expirationDate": self._card_expiration_date(),
-                "securityCode": self.card.cvv,
-                "type": card_type,
-                "productClass": self.card.card_type,
-            },
+            "card": card,
             "country": self.address.country,
             "email": self.user.email,
             "firstName": self.user.first_name,
@@ -6164,67 +6181,144 @@ class PayPalFlow:
             }
         return variables
 
-    def _send_address_autocomplete(self, token: str) -> None:
+    @staticmethod
+    def _graphql_data_object(result: object) -> dict[str, Any]:
+        result_obj = result[0] if isinstance(result, list) and result else result
+        if not isinstance(result_obj, dict):
+            return {}
+        data = result_obj.get("data")
+        return cast(dict[str, Any], data) if isinstance(data, dict) else {}
+
+    def _send_address_autocomplete(self, token: str) -> bool:
+        del token  # The browser autocomplete operations are bound by session cookies/EC context.
         self._billing_address_autocomplete_succeeded = False
-        if self.country_profile.address_mode != "AUTOCOMPLETE":
-            logger.debug(
-                "Skipping address autocomplete for {} MANUAL address profile",
+        self._billing_address_autocomplete_type = "MANUAL"
+        if not self.address_autocomplete_enabled:
+            logger.info(
+                "Address autocomplete disabled for {}; using MANUAL billing address.",
                 self.country_profile.country,
             )
-            return
-        try:
-            address_result = self.session.graphql(
-                "AddressAutocompleteFromPostalCodeQuery",
-                ADDRESS_AUTOCOMPLETE_FROM_POSTAL_CODE_QUERY,
-                {
-                    "country": self.address.country,
-                    "postalCode": self.address.postal_code,
-                    "token": token,
-                },
+            return False
+
+        country = self.country_profile.country
+        language = self.country_profile.graphql_language
+        input_line = self._billing_line1().strip()
+        if not input_line:
+            raise RuntimeError(
+                f"ADDRESS_AUTOCOMPLETE_FAILED: country={country} stage=input reason=empty_line1"
             )
-            result_obj = address_result[0] if isinstance(address_result, list) else address_result
-            result_dict = cast(dict[str, Any], result_obj) if isinstance(result_obj, dict) else {}
-            data = result_dict.get("data") if isinstance(result_dict.get("data"), dict) else {}
-            normalized = cast(dict[str, Any], data).get("addressNormalization") or {}
-            if not isinstance(normalized, dict) or not normalized:
-                logger.warning(
-                    "AddressAutocompleteFromPostalCodeQuery returned no usable normalized "
-                    "address; using MANUAL billing address metadata."
+
+        session_id = str(uuid4())
+        try:
+            suggestion_result = self.session.graphql(
+                "AddressAutocompleteQuery",
+                ADDRESS_AUTOCOMPLETE_QUERY,
+                {
+                    "count": 5,
+                    "countries": [country],
+                    "input": input_line,
+                    "language": language,
+                    "radius": 1500,
+                    "sessionId": session_id,
+                },
+                require_http_success=True,
+            )
+            suggestion_data = self._graphql_data_object(suggestion_result)
+            autocomplete = suggestion_data.get("addressAutoComplete")
+            suggestions = (
+                autocomplete.get("suggestions")
+                if isinstance(autocomplete, dict)
+                else None
+            )
+            candidates = [
+                item
+                for item in (suggestions if isinstance(suggestions, list) else [])
+                if isinstance(item, dict)
+                and str(item.get("placeId") or "").strip()
+                and str(item.get("placeId") or "").strip() != "IDONTSEEIT"
+            ]
+            if not candidates:
+                raise RuntimeError(
+                    f"ADDRESS_AUTOCOMPLETE_FAILED: country={country} "
+                    "stage=suggestions reason=no_usable_suggestion"
                 )
-                return
+
+            place_id = str(candidates[0]["placeId"]).strip()
+            resolved_result = self.session.graphql(
+                "AddressFromAutocompletePlaceIdQuery",
+                ADDRESS_FROM_AUTOCOMPLETE_PLACE_ID_QUERY,
+                {
+                    "language": language,
+                    "placeId": place_id,
+                    "sessionId": session_id,
+                },
+                require_http_success=True,
+            )
+            resolved_data = self._graphql_data_object(resolved_result)
+            place_result = resolved_data.get("addressFromAutoCompletePlaceId")
+            normalized = (
+                place_result.get("address")
+                if isinstance(place_result, dict)
+                else None
+            )
+            if not isinstance(normalized, dict) or not normalized:
+                raise RuntimeError(
+                    f"ADDRESS_AUTOCOMPLETE_FAILED: country={country} "
+                    "stage=place_resolution reason=missing_address"
+                )
 
             missing_fields = [
                 field
-                for field in ("line1", "city", "state", "postalCode")
+                for field in ("line1", "city", "postalCode", "country")
                 if not str(normalized.get(field) or "").strip()
             ]
+            if self.address.state and not str(normalized.get("state") or "").strip():
+                missing_fields.append("state")
             if missing_fields:
-                logger.warning(
-                    "AddressAutocompleteFromPostalCodeQuery returned incomplete normalized "
-                    "address missing={}; using MANUAL billing address metadata. values={} {} {} {}",
-                    ",".join(missing_fields),
-                    normalized.get("line1"),
-                    normalized.get("line2"),
-                    normalized.get("city"),
-                    normalized.get("state"),
+                raise RuntimeError(
+                    f"ADDRESS_AUTOCOMPLETE_FAILED: country={country} "
+                    "stage=validation missing=" + ",".join(dict.fromkeys(missing_fields))
                 )
-                return
 
-            logger.info(
-                "Address normalized: {}, {}, {} {}",
-                normalized.get("line1"),
-                normalized.get("line2"),
-                normalized.get("city"),
-                normalized.get("state"),
-            )
-            self.address.street = normalized.get("line1") or self.address.street
-            self.address.district = normalized.get("line2") or self.address.district
-            self.address.city = normalized.get("city") or self.address.city
-            self.address.state = normalized.get("state") or self.address.state
-            self.address.postal_code = normalized.get("postalCode") or self.address.postal_code
+            resolved_country = str(normalized.get("country") or "").strip().upper()
+            if resolved_country != country:
+                raise RuntimeError(
+                    f"ADDRESS_AUTOCOMPLETE_FAILED: country={country} "
+                    f"stage=validation reason=country_mismatch returned={resolved_country or 'missing'}"
+                )
+
+            # Place-id resolution returns a complete line1, so clear the old
+            # separately generated house number before serializing it again.
+            self.address.street = str(normalized["line1"]).strip()
+            self.address.house_number = ""
+            self.address.district = str(normalized.get("line2") or "").strip()
+            self.address.city = str(normalized["city"]).strip()
+            resolved_state = str(normalized.get("state") or "").strip()
+            self.address.state = resolved_state or None
+            self.address.postal_code = str(normalized["postalCode"]).strip()
+            self.address.country = resolved_country
             self._billing_address_autocomplete_succeeded = True
+            self._billing_address_autocomplete_type = "GOOGLE"
+            self._on_billing_address_updated()
+            logger.info(
+                "Address autocomplete completed: country={} type=GOOGLE suggestion_count={}",
+                country,
+                len(candidates),
+            )
+            return True
         except Exception as e:
-            logger.warning(f"AddressAutocompleteFromPostalCodeQuery failed: {e}")
+            if isinstance(e, RuntimeError) and str(e).startswith("ADDRESS_AUTOCOMPLETE_FAILED:"):
+                raise
+            raise RuntimeError(
+                f"ADDRESS_AUTOCOMPLETE_FAILED: country={country} "
+                f"stage=request error={type(e).__name__}"
+            ) from e
+
+    def _prepare_signup_billing_address(self, token: str) -> None:
+        if self._signup_billing_address_prepared:
+            return
+        self._send_address_autocomplete(token)
+        self._signup_billing_address_prepared = True
 
     def _send_signup_attempt(self, token: str, signup_url: str) -> dict[str, Any] | list[Any]:
         card_type = self._card_issuer_type()
@@ -6272,13 +6366,10 @@ class PayPalFlow:
             )
 
         if not getattr(self, "_signup_billing_address_prepared", False):
-            self._send_address_autocomplete(token)
-            self._signup_billing_address_prepared = True
-        else:
-            logger.info(
-                "Reusing prepared billing address for card retry; "
-                "skipping AddressAutocompleteFromPostalCodeQuery."
+            raise RuntimeError(
+                "SIGNUP_BILLING_ADDRESS_NOT_PREPARED: address completion must finish before OTP"
             )
+        logger.info("Reusing billing address prepared before OTP for signup/card retry.")
 
         risk_mode = self._signup_context_risk_mode()
         if risk_mode == "headless":
@@ -6734,7 +6825,6 @@ class PayPalFlow:
             raise RuntimeError("Signup is already committed but no access token is available")
         self.state.euat_token = ""
         self.state.signup_fallback_reason = ""
-        self._signup_billing_address_prepared = False
         last_errors: list[dict[str, Any]] = []
         last_access_token = ""
 
@@ -7510,6 +7600,11 @@ class PayPalFlow:
                 "Run Phase 2 again with a valid BA token."
             )
         token = self.state.ec_token
+
+        # Strict address completion must finish before initiating any SMS.
+        # If enabled, search/selection/validation failures terminate here so a
+        # paid or limited OTP activation is never consumed for bad address data.
+        self._prepare_signup_billing_address(token)
 
         # Browser emits idapps/graphql getOtpChallengeOperation around the OTP
         # challenge context before the signup/2FA path proceeds.  Missing this

@@ -26,6 +26,9 @@ def _bare_flow(country: str) -> PayPalFlow:
     flow.state = SessionState(ba_token="BA-12345678ABCDEFG")
     flow.state.content_identifier = f"{country}:{profile.graphql_language}:compliance.signupTerms"
     flow._billing_address_autocomplete_succeeded = country == "BR"
+    flow._billing_address_autocomplete_type = "ANS" if country == "BR" else "MANUAL"
+    flow.address_autocomplete_enabled = profile.address_mode == "AUTOCOMPLETE"
+    flow._signup_billing_address_prepared = False
     flow._content_metadata_is_unresolved = lambda: False
     flow._resolved_content_identifier = lambda: flow.state.content_identifier
     return flow
@@ -38,10 +41,12 @@ def test_signup_variables_are_country_specific(country: str) -> None:
     assert variables["country"] == country
     assert variables["phone"]["countryCode"] == flow.country_profile.dial_prefix.lstrip("+")
     if country == "BR":
+        assert variables["card"]["productClass"] == "DEBIT"
         assert variables["identityDocument"]["type"] == "CPF"
         assert variables["billingAddress"]["state"]
         assert variables["billingAddress"]["accountQuality"]["autoCompleteType"] == "ANS"
     else:
+        assert "productClass" not in variables["card"]
         assert "identityDocument" not in variables
         assert variables["billingAddress"]["accountQuality"]["autoCompleteType"] == "MANUAL"
     if country == "BA":
@@ -49,6 +54,7 @@ def test_signup_variables_are_country_specific(country: str) -> None:
     if country == "US":
         assert variables["phone"]["countryCode"] == "1"
         assert variables["billingAddress"]["state"] in {"IL", "WI", "MN", "MO"}
+        assert "line2" not in variables["billingAddress"]
         assert variables["billingAddress"]["line1"] == (
             f"{flow.address.house_number} {flow.address.street}"
         )
@@ -61,6 +67,144 @@ def test_phone_update_rejects_cross_country_change() -> None:
     assert flow.user.phone == "+66000000001"
     with pytest.raises(ValueError, match="cannot change"):
         flow._update_user_phone("+38700000000")
+
+
+class _AddressAutocompleteSession:
+    def __init__(self, country: str, state: str | None) -> None:
+        self.country = country
+        self.state = state
+        self.calls: list[tuple[str, dict[str, object], dict[str, object]]] = []
+
+    def graphql(self, operation_name, _query, variables, **kwargs):
+        self.calls.append((operation_name, dict(variables), dict(kwargs)))
+        if operation_name == "AddressAutocompleteQuery":
+            return {
+                "data": {
+                    "addressAutoComplete": {
+                        "suggestions": [
+                            {
+                                "addressText": "10 Test Street",
+                                "mainText": "10 Test Street",
+                                "placeId": f"place-{self.country}",
+                                "secondaryText": "Test City",
+                            }
+                        ]
+                    }
+                }
+            }
+        if operation_name == "AddressFromAutocompletePlaceIdQuery":
+            return {
+                "data": {
+                    "addressFromAutoCompletePlaceId": {
+                        "address": {
+                            "line1": "10 Test Street",
+                            "line2": "",
+                            "city": "Test City",
+                            "state": self.state,
+                            "postalCode": "12345",
+                            "country": self.country,
+                        }
+                    }
+                }
+            }
+        raise AssertionError(f"unexpected GraphQL operation: {operation_name}")
+
+
+@pytest.mark.parametrize(
+    ("country", "resolved_state"),
+    [("BR", "SP"), ("TH", "BANGKOK"), ("BA", None), ("US", "IL")],
+)
+def test_strict_address_autocomplete_supports_every_country(
+    country: str,
+    resolved_state: str | None,
+) -> None:
+    flow = _bare_flow(country)
+    flow.address_autocomplete_enabled = True
+    flow._billing_address_autocomplete_succeeded = False
+    flow._billing_address_autocomplete_type = "MANUAL"
+    original_line1 = flow._billing_line1()
+    session = _AddressAutocompleteSession(country, resolved_state)
+    flow.session = session
+    updates: list[str] = []
+    flow._on_billing_address_updated = lambda: updates.append("updated")
+
+    assert flow._send_address_autocomplete("EC-12345678ABCDEFG") is True
+
+    assert [call[0] for call in session.calls] == [
+        "AddressAutocompleteQuery",
+        "AddressFromAutocompletePlaceIdQuery",
+    ]
+    search_variables = session.calls[0][1]
+    resolve_variables = session.calls[1][1]
+    assert search_variables["countries"] == [country]
+    assert search_variables["input"] == original_line1
+    assert search_variables["language"] == flow.country_profile.graphql_language
+    assert search_variables["sessionId"] == resolve_variables["sessionId"]
+    assert all(call[2]["require_http_success"] is True for call in session.calls)
+    assert flow.address.house_number == ""
+    assert flow.address.street == "10 Test Street"
+    assert flow.address.city == "Test City"
+    assert flow.address.state == resolved_state
+    assert flow._billing_address_autocomplete_succeeded is True
+    assert flow._billing_address_autocomplete_type == "GOOGLE"
+    assert updates == ["updated"]
+
+    variables = flow._build_signup_variables("EC-12345678ABCDEFG")
+    assert variables["billingAddress"]["line1"] == "10 Test Street"
+    assert variables["billingAddress"]["accountQuality"]["autoCompleteType"] == "GOOGLE"
+
+
+def test_enabled_address_autocomplete_fails_strictly_without_suggestions() -> None:
+    flow = _bare_flow("US")
+    flow.address_autocomplete_enabled = True
+
+    class _NoSuggestions:
+        def graphql(self, *_args, **_kwargs):
+            return {"data": {"addressAutoComplete": {"suggestions": []}}}
+
+    flow.session = _NoSuggestions()
+    with pytest.raises(
+        RuntimeError,
+        match=r"ADDRESS_AUTOCOMPLETE_FAILED:.*no_usable_suggestion",
+    ):
+        flow._send_address_autocomplete("EC-12345678ABCDEFG")
+
+    assert flow._billing_address_autocomplete_succeeded is False
+    assert flow._billing_address_autocomplete_type == "MANUAL"
+
+
+def test_disabled_address_autocomplete_makes_no_graphql_request() -> None:
+    flow = _bare_flow("BA")
+    flow.address_autocomplete_enabled = False
+
+    class _NoGraphqlExpected:
+        def graphql(self, *_args, **_kwargs):
+            raise AssertionError("disabled autocomplete must not call GraphQL")
+
+    flow.session = _NoGraphqlExpected()
+    assert flow._send_address_autocomplete("EC-12345678ABCDEFG") is False
+    assert flow._billing_address_autocomplete_type == "MANUAL"
+
+
+def test_address_autocomplete_failure_stops_before_otp() -> None:
+    flow = _bare_flow("US")
+    flow.state.ec_token = "EC-12345678ABCDEFG"
+    flow.state.signup_url = "https://www.paypal.com/checkoutweb/signup?token=EC-12345678ABCDEFG"
+    flow.session = object()
+    flow._send_tealeaf_data = lambda *_args, **_kwargs: None
+    otp_calls: list[str] = []
+    flow._send_idapps_get_otp_challenge = lambda *_args, **_kwargs: otp_calls.append("idapps")
+    flow._confirm_phone_with_retry = lambda *_args, **_kwargs: otp_calls.append("sms")
+
+    def fail_address(_token: str) -> None:
+        raise RuntimeError("ADDRESS_AUTOCOMPLETE_FAILED: test")
+
+    flow._prepare_signup_billing_address = fail_address
+
+    with pytest.raises(RuntimeError, match="ADDRESS_AUTOCOMPLETE_FAILED"):
+        flow._phase3_signup_and_2fa()
+
+    assert otp_calls == []
 
 
 def test_modxo_router_state_is_derived_from_current_flight_html() -> None:

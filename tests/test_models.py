@@ -4,6 +4,15 @@ from paypal.country import profile_for_country
 from paypal.models import generate_address, generate_card, generate_user
 
 
+_US_ADDRESS_FIXTURES = {
+    ("401", "North Michigan Avenue", "Chicago", "IL", "60611"),
+    ("111", "North State Street", "Chicago", "IL", "60602"),
+    ("400", "West Wisconsin Avenue", "Milwaukee", "WI", "53203"),
+    ("600", "Nicollet Mall", "Minneapolis", "MN", "55402"),
+    ("414", "East 12th Street", "Kansas City", "MO", "64106"),
+}
+
+
 @pytest.mark.parametrize(
     ("country", "phone", "dial_prefix", "has_cpf"),
     [
@@ -42,6 +51,14 @@ def test_address_generation_matches_country(country: str) -> None:
         assert len(address.state) == 2
         assert address.postal_code.isdigit()
         assert len(address.postal_code) == 5
+        assert address.district == ""
+        assert (
+            address.house_number,
+            address.street,
+            address.city,
+            address.state,
+            address.postal_code,
+        ) in _US_ADDRESS_FIXTURES
 
 
 def test_shared_ctf_card_pool_only_uses_expected_bins() -> None:
@@ -49,3 +66,4 @@ def test_shared_ctf_card_pool_only_uses_expected_bins() -> None:
         card = generate_card()
         assert card.number.startswith(("414709", "516292"))
         assert not card.number.startswith("403203")
+        assert card.card_type == "DEBIT"

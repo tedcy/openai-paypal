@@ -57,6 +57,8 @@ def test_web_create_job_accepts_all_country_phones_without_starting_flow(phone: 
     assert job.ba_token == "BA-TESTTOKEN123456"
     assert job.phone == phone
     assert job.status == "queued"
+    assert job.address_autocomplete_enabled is True
+    assert job.to_dict()["address_autocomplete_enabled"] is True
     assert f"region={web.profile_for_phone(phone).country}" in job.proxy_label
     assert "sid=TestSid1" in job.proxy_label
     assert "proxy-password" not in job.proxy_label
@@ -71,6 +73,20 @@ def test_web_create_job_rejects_unsupported_phone_prefix() -> None:
             debug=False,
             max_card_attempts=5,
         )
+
+
+def test_web_address_autocomplete_can_be_disabled() -> None:
+    job = web.create_job(
+        owner_device_id="test-manual-address",
+        ba_token="BA-TESTTOKEN123456",
+        phone="+12025550123",
+        debug=False,
+        max_card_attempts=5,
+        address_autocomplete_enabled=False,
+    )
+
+    assert job.address_autocomplete_enabled is False
+    assert job.to_dict()["address_autocomplete_enabled"] is False
 
 
 def test_web_smsbower_without_phone_defaults_to_br(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -237,6 +253,7 @@ def test_protocol_signup_runner_stops_before_full_flow(
     assert kwargs["browser_profile_seed"]["chrome_major"] == 136
     assert kwargs["browser_profile_seed"]["ua_client_hints_enabled"] is False
     assert kwargs["require_valid_signup_document"] is False
+    assert kwargs["address_autocomplete_enabled"] is True
     assert job.status == "completed"
     assert job.stage == "纯协议 Signup 200，已安全停止"
     assert job.result["roxy_api_calls"] == 0
@@ -408,6 +425,12 @@ def test_web_ui_exposes_and_locks_protocol_routes() -> None:
     assert 'datadome_mode: "protocol"' in javascript
     assert 'mtr_runtime: "python_generated"' in javascript
     assert '$("#smsbowerEnabled").disabled = signupProbe' in javascript
+    assert 'id="addressAutocompleteEnabled"' in html
+    assert 'name="addressAutocompleteEnabled"' in html
+    assert 'address_autocomplete_enabled: $("#addressAutocompleteEnabled").checked' in javascript
+    assert '<details id="smsOptions" class="optional-settings">' in html
+    assert '<details id="smsOptions" class="optional-settings" open>' not in html
+    assert '$("#smsOptions").classList.toggle("hidden", signupProbe)' in javascript
     assert 'id="automaticProxyHint"' in html
     assert 'id="proxyMode"' not in html
     assert 'id="proxyUrl"' not in html

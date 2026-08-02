@@ -27,7 +27,8 @@ class CardInfo:
     number: str
     expiry: str  # MM/YYYY
     cvv: str
-    card_type: str = "CREDIT"
+    # PayPal CardProductClass, not the VISA/MASTER_CARD issuer enum.
+    card_type: str = "DEBIT"
 
 
 @dataclass
@@ -347,21 +348,20 @@ _BA_ADDRESSES = [
     ("Kneza Branimira", "Centar", "Mostar", None, "88000"),
 ]
 
-# Keep generated US addresses within the America/Chicago timezone used by the
-# browser profile so address, locale and risk telemetry remain internally
-# consistent. House numbers are generated separately.
+# Keep complete US address tuples within the America/Chicago timezone used by
+# the browser profile.  The house number is part of each fixture so it cannot
+# drift away from the corresponding street and ZIP code.
 _US_ADDRESSES = [
-    ("Michigan Avenue", "Near North Side", "Chicago", "IL", "60611"),
-    ("State Street", "Loop", "Chicago", "IL", "60602"),
-    ("West Wisconsin Avenue", "Westown", "Milwaukee", "WI", "53203"),
-    ("Nicollet Mall", "Downtown West", "Minneapolis", "MN", "55402"),
-    ("Main Street", "Downtown", "Kansas City", "MO", "64106"),
+    ("401", "North Michigan Avenue", "Chicago", "IL", "60611"),
+    ("111", "North State Street", "Chicago", "IL", "60602"),
+    ("400", "West Wisconsin Avenue", "Milwaukee", "WI", "53203"),
+    ("600", "Nicollet Mall", "Minneapolis", "MN", "55402"),
+    ("414", "East 12th Street", "Kansas City", "MO", "64106"),
 ]
 
 _MANUAL_ADDRESSES = {
     "TH": _TH_ADDRESSES,
     "BA": _BA_ADDRESSES,
-    "US": _US_ADDRESSES,
 }
 
 
@@ -417,7 +417,7 @@ def generate_card(proxy_url: str | None = None) -> CardInfo:
     expiry = f"{month:02d}/{year}"
     cvv = f"{random.randint(100, 999)}"
 
-    return CardInfo(number=number, expiry=expiry, cvv=cvv, card_type="CREDIT")
+    return CardInfo(number=number, expiry=expiry, cvv=cvv, card_type="DEBIT")
 
 
 def generate_cpf() -> str:
@@ -484,6 +484,18 @@ def generate_address(profile: CountryProfile | str | None = None) -> BillingAddr
         if isinstance(profile, str)
         else profile or profile_for_country("BR")
     )
+    if selected.country == "US":
+        house_number, street, city, state, postal_code = random.choice(_US_ADDRESSES)
+        return BillingAddress(
+            street=street,
+            house_number=house_number,
+            district="",
+            city=city,
+            state=state,
+            postal_code=postal_code,
+            country=selected.country,
+        )
+
     if selected.country != "BR":
         try:
             rows = _MANUAL_ADDRESSES[selected.country]

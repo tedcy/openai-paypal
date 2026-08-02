@@ -25,7 +25,7 @@ https://www.paypal.com/agreements/approve?ba_token=BA-...
 - OTP 阶段可以换同国号码；跨国换号会被拒绝，需要新建任务。
 - SMSBower 仅支持 BR；SMSBower 模式不填手机号时默认 BR。
 - CPF/`identityDocument` 只在 BR 生成和提交；TH/BA/US 完全省略字段。
-- BR 使用地址自动补全；TH/BA/US 使用一致的英文/拉丁姓名与 MANUAL 地址。
+- Web 默认对 BR/TH/BA/US 使用严格地址自动补全；关闭开关后使用本地 MANUAL 地址。
 - 四国共用 CTF 卡池 `414709/516292`，不会生成 `403203`。
 
 成功结果包含授权状态、Billing Agreement Token、Payment Action、Buyer ID 和脱敏 Return URL。程序不会访问 Return URL 指向的 Stripe 或商户站点。
@@ -92,6 +92,8 @@ curl http://127.0.0.1:8080/api/health
 ```
 
 手动任务会在 OTP 阶段暂停。此时输入 6 位验证码、同国新手机号，或输入 `q` 退出。
+
+“地址自动补全”默认开启：程序在发送 OTP 前执行浏览器同款的候选搜索和 place-id 完整地址解析，并将成功结果标记为 `GOOGLE`。搜索、解析、国家或必填字段校验任一步失败都会立即终止，不会消耗短信接码；关闭后直接使用本地 `MANUAL` 地址。SMSBower 设置默认折叠，需要时再展开启用。
 
 Web 的“执行路线”有三种：
 
